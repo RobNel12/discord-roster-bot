@@ -7,10 +7,11 @@ import {
 
 import type { RosterRepository } from "./database.js";
 import type { RosterScheduler } from "./scheduler.js";
-import { officerRankForSeconds, rankDisplayName, rankForSeconds } from "./ranks.js";
+import { ENLISTED_RANKS, OFFICER_RANKS, rankDisplayName } from "./ranks.js";
 
 export class TemporaryVoiceService {
   private readonly pendingOwners = new Set<string>();
+  private readonly rankTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly repository: RosterRepository,
@@ -22,11 +23,10 @@ export class TemporaryVoiceService {
     const config = this.repository.getGuildConfig(guild.id);
 
     if (before.channelId && before.channelId !== after.channelId && before.member) {
-      const rankBefore = this.repository.getMemberRankState(guild.id, before.member.id);
+      this.cancelRankTimer(guild.id, before.member.id);
       const elapsed = this.repository.endVoiceActivity(guild.id, before.member.id);
       if (elapsed > 0) {
         this.scheduler.schedule(guild.id, "squad");
-        await this.announcePromotion(guild, before.member.id, rankBefore);
       }
     }
 
@@ -41,6 +41,7 @@ export class TemporaryVoiceService {
           Boolean(config.squadLeaderRoleId && after.member.roles.cache.has(config.squadLeaderRoleId));
         this.repository.ensureMemberRankTrack(guild.id, after.member.id, isOfficer ? "officer" : "enlisted");
         this.repository.beginVoiceActivity(guild.id, after.member.id, voiceChannel.squadId);
+        this.scheduleNextRankUpdate(guild, after.member.id);
       }
     }
 
@@ -53,19 +54,52 @@ export class TemporaryVoiceService {
     }
   }
 
-  private async announcePromotion(guild: Guild, userId: string, before: { activitySeconds: number; rankTrack: "enlisted" | "officer"; manualRank: string | null }): Promise<void> {
-    if (before.manualRank) return;
-    const member = await guild.members.fetch(userId).catch(() => null);
+  stop(): void {
+    for (const timer of this.rankTimers.values()) clearTimeout(timer);
+    this.rankTimers.clear();
+  }
+
+  private scheduleNextRankUpdate(guild: Guild, userId: string): void {
+    this.cancelRankTimer(guild.id, userId);
+    const state = this.repository.getMemberRankState(guild.id, userId);
+    if (state.manualRank) return;
+    const member = guild.members.cache.get(userId);
     if (!member) return;
     const canReachGeneral = member.id === guild.ownerId || member.permissions.has(PermissionFlagsBits.ManageGuild);
-    const after = this.repository.getMemberRankState(guild.id, userId);
-    if (after.manualRank) return;
-    const rankAt = (seconds: number) => before.rankTrack === "officer"
-      ? officerRankForSeconds(seconds, canReachGeneral)
-      : rankForSeconds(seconds);
-    const previousRank = rankAt(before.activitySeconds);
-    const nextRank = rankAt(after.activitySeconds);
-    if (previousRank === nextRank) return;
+    const track = state.rankTrack === "officer"
+      ? (canReachGeneral ? OFFICER_RANKS : OFFICER_RANKS.slice(0, 6))
+      : ENLISTED_RANKS;
+    const seconds = this.repository.getVoiceActivitySeconds(guild.id, userId);
+    const nextIndex = track.findIndex((rank) => rank.requiredSeconds > seconds);
+    if (nextIndex < 0) return;
+    const next = track[nextIndex]!;
+    const previous = track[Math.max(0, nextIndex - 1)]!;
+    const delay = Math.max(1, next.requiredSeconds - seconds) * 1_000;
+    const key = `${guild.id}:${userId}`;
+    const timer = setTimeout(() => {
+      this.rankTimers.delete(key);
+      void (async () => {
+        const stillActive = this.repository.listActiveVoiceSessions(guild.id).some((session) => session.userId === userId);
+        if (!stillActive) return;
+        this.scheduler.schedule(guild.id, "squad");
+        await this.announcePromotion(guild, userId, previous.abbreviation, next.abbreviation);
+        this.scheduleNextRankUpdate(guild, userId);
+      })();
+    }, delay);
+    timer.unref();
+    this.rankTimers.set(key, timer);
+  }
+
+  private cancelRankTimer(guildId: string, userId: string): void {
+    const key = `${guildId}:${userId}`;
+    const timer = this.rankTimers.get(key);
+    if (timer) clearTimeout(timer);
+    this.rankTimers.delete(key);
+  }
+
+  private async announcePromotion(guild: Guild, userId: string, previousRank: string, nextRank: string): Promise<void> {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) return;
     const channelId = this.repository.getGuildConfig(guild.id).rankUpdateChannelId;
     if (!channelId) return;
     const channel = await guild.channels.fetch(channelId).catch(() => null);
@@ -102,12 +136,16 @@ export class TemporaryVoiceService {
               Boolean(config.squadLeaderRoleId && member.roles.cache.has(config.squadLeaderRoleId));
             this.repository.ensureMemberRankTrack(guild.id, member.id, isOfficer ? "officer" : "enlisted");
             this.repository.beginVoiceActivity(guild.id, member.id, record.squadId);
+            this.scheduleNextRankUpdate(guild, member.id);
           }
         }
       }
     }
     for (const session of this.repository.listActiveVoiceSessions(guild.id)) {
-      if (!activeUsers.has(session.userId)) this.repository.endVoiceActivity(guild.id, session.userId);
+      if (!activeUsers.has(session.userId)) {
+        this.cancelRankTimer(guild.id, session.userId);
+        this.repository.endVoiceActivity(guild.id, session.userId);
+      }
     }
   }
 

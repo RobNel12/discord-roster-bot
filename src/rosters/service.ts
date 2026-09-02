@@ -267,7 +267,8 @@ export class RosterService {
     const canReachGeneral = member.id === guild.ownerId || member.permissions.has(PermissionFlagsBits.ManageGuild);
     const isOfficer = canReachGeneral || Boolean(leaderRoleId && member.roles.cache.has(leaderRoleId));
     const track = isOfficer ? "officer" : "enlisted";
-    const seconds = this.repository.ensureMemberRankTrack(guild.id, member.id, track);
+    this.repository.ensureMemberRankTrack(guild.id, member.id, track);
+    const seconds = this.repository.getVoiceActivitySeconds(guild.id, member.id);
     const state = this.repository.getMemberRankState(guild.id, member.id);
     if (!isOfficer && state.manualRank && isManualEnlistedRank(state.manualRank)) return state.manualRank;
     return isOfficer ? officerRankForSeconds(seconds, canReachGeneral) : rankForSeconds(seconds);

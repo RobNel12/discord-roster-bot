@@ -221,7 +221,7 @@ Assigned loadout roles remain visible in the squad roster until a manager clears
 
 The bot persistently tracks how long each member serves in each assigned loadout role while connected to their tracked squad voice channel. During future assignments, members with more time in a needed role receive priority among volunteers at the same preference tier; total squad voice activity is used only as a tie-breaker. Before every assignment run, the bot refreshes each voice member directly from Discord so recently changed preference roles are used immediately. Preference matching accepts either the Discord role selected during configuration or an exact `1st [role]` / `2nd [role]` role name, so a stale configured role mapping does not hide a valid preference. Role timers stop on voice leave, reassignment, assignment clearing, squad movement, server departure, or squad deletion.
 
-The squad roster includes a dedicated **Squad Leaders** section when a squad leader role is configured. It shows each leader's current rank and assigned squad, including leaders who are currently Unassigned. `/squad rank-progress` includes time from an active voice session, not only completed sessions. Automatic promotions are announced in the configured rank-update channel when a tracked voice session ends.
+The squad roster includes a dedicated **Squad Leaders** section when a squad leader role is configured. It shows each leader's current rank and assigned squad, including leaders who are currently Unassigned. `/squad rank-progress` includes time from an active voice session, not only completed sessions. While a member remains in tracked squad voice, the roster refreshes at the exact next rank threshold and automatic promotions are announced immediately in the configured rank-update channel; leaving and rejoining is unnecessary.
 
 ## Persistence and operations
 
@@ -259,6 +259,6 @@ Running `deploy:commands` is important after command changes. Keep `.env` privat
 - **A squad leader cannot manage squads:** confirm that `/squad set-leader-role` points to the exact role currently assigned to that member.
 - **A preferred loadout keeps becoming Rifleman:** confirm the member is in the correct squad voice channel, the squad has a positive percentage for that specialist, and the Discord role is named `1st Role Name` or `2nd Role Name`. Rerunning assignment replaces the prior result.
 - **Rank time is not increasing:** only time in a tracked temporary voice channel belonging to the member's assigned squad counts. Ordinary voice channels and another squad's channel do not count.
-- **Promotion messages do not appear:** run `/squad set-rank-channel` and verify the bot has View Channel and Send Messages there. Promotions are announced when the tracked voice session ends.
+- **Promotion messages do not appear:** run `/squad set-rank-channel` and verify the bot has View Channel and Send Messages there. The bot schedules each announcement for the live promotion threshold while the member remains in tracked squad voice.
 
 Discord references: [Gateway intents](https://docs.discord.com/developers/events/gateway), [application command permissions](https://docs.discord.com/developers/interactions/application-commands), and [message/allowed-mention behavior](https://docs.discord.com/developers/resources/message).

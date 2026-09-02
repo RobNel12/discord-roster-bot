@@ -57,6 +57,7 @@ export class RosterBot {
       this.reconcileTimer = undefined;
     }
     this.client.removeAllListeners();
+    this.temporaryVoice.stop();
 
     const schedulerDrain = this.scheduler.stop();
     await Promise.allSettled([schedulerDrain, ...this.activeTasks]);

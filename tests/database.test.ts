@@ -70,6 +70,13 @@ describe("RosterRepository", () => {
     expect(repository.getMemberRankState("guild-1", "member-a").manualRank).toBe("SMA");
   });
 
+  it("includes an active voice session in live rank time before the member leaves", () => {
+    const now = Math.floor(Date.now() / 1_000);
+    repository.beginVoiceActivity("guild-live-rank", "member-live", 1, now - 120);
+    expect(repository.getVoiceActivitySeconds("guild-live-rank", "member-live")).toBeGreaterThanOrEqual(120);
+    repository.endVoiceActivity("guild-live-rank", "member-live", now);
+  });
+
   it("stores and safely clears the rank update channel", () => {
     repository.setRankUpdateChannel("guild-ranks", "rank-channel");
     expect(repository.getGuildConfig("guild-ranks").rankUpdateChannelId).toBe("rank-channel");
