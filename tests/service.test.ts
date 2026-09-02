@@ -58,6 +58,36 @@ describe("RosterService", () => {
     expect(fields[1]?.value).not.toContain("200000000000000003");
   });
 
+  it("publishes named role pages and highlights priority roles", async () => {
+    const commandId = "100000000000000011";
+    const supportId = "100000000000000012";
+    const reserveId = "100000000000000013";
+    const memberId = "200000000000000011";
+    const members = new Collection<string, GuildMember>([[memberId, fakeMember(memberId, "Alpha", [commandId, supportId, reserveId])]]);
+    const roles = new Collection<string, Role>([
+      [commandId, fakeRole(commandId, "Command")],
+      [supportId, fakeRole(supportId, "Support")],
+      [reserveId, fakeRole(reserveId, "Reserve")],
+    ]);
+    const harness = createHarness(members, roles);
+    harness.repository.replaceRoleRosterSetup(harness.guild.id, "role-channel", [
+      { name: "Leadership", roles: [{ roleId: commandId, highPriority: true }] },
+      { name: "Logistics", roles: [{ roleId: supportId, highPriority: false }] },
+      { name: "Reserve", roles: [{ roleId: reserveId, highPriority: false }] },
+    ]);
+    await harness.service.syncRoleRoster(harness.guild.id);
+
+    expect(harness.publications[0]?.pages[0]?.toJSON().title).toBe("Role roster — Leadership");
+    expect(harness.publications[0]?.pages[0]?.toJSON().fields?.[0]?.name).toContain("⭐");
+    await harness.service.turnRoleRosterPage(harness.guild.id, 1);
+    expect(harness.publications[1]?.pages[0]?.toJSON().title).toBe("Role roster — Logistics");
+    expect(harness.publications[1]?.pages[0]?.toJSON().fields?.[0]?.name).toBe("Support — 1");
+    await harness.service.turnRoleRosterPage(harness.guild.id, 1);
+    expect(harness.publications[2]?.pages[0]?.toJSON().title).toBe("Role roster — Reserve");
+    await harness.service.turnRoleRosterPage(harness.guild.id, 1);
+    expect(harness.publications[3]?.pages[0]?.toJSON().title).toBe("Role roster — Leadership");
+  });
+
   it("continues with the squad roster when the role roster fails", async () => {
     const harness = createHarness();
     harness.repository.setRoleRosterChannel(harness.guild.id, "role-channel");
@@ -112,6 +142,9 @@ describe("RosterService", () => {
       alpha.id,
       "leader",
     );
+    harness.repository.replaceSquadLoadoutAssignments(harness.guild.id, alpha.id, [
+      { userId: "200000000000000002", roleName: "Medic" },
+    ]);
 
     await harness.service.syncSquadRoster(harness.guild.id);
 
@@ -121,7 +154,7 @@ describe("RosterService", () => {
       "Bravo — 0",
       "Unassigned — 1",
     ]);
-    expect(fields[0]?.value).toBe("• <@200000000000000002> — **Pvt.**");
+    expect(fields[0]?.value).toBe("• <@200000000000000002> — **Pvt.** · **Medic**");
     expect(fields[2]?.value).toBe("• <@200000000000000001>");
     expect(JSON.stringify(fields)).not.toContain("200000000000000003");
     const controls = harness.publications[0]?.components.map((row) => row.toJSON()) ?? [];
@@ -132,15 +165,13 @@ describe("RosterService", () => {
         expect.objectContaining({
           label: "Alpha",
           value: String(alpha.id),
-          emoji: expect.objectContaining({ name: "✅" }),
         }),
         expect.objectContaining({
           label: "Bravo",
-          emoji: expect.objectContaining({ name: "✅" }),
         }),
       ],
     });
-    expect(controls[1]?.components[0]).toMatchObject({
+    expect(controls[1]?.components[4]).toMatchObject({
       custom_id: "squad:v1:leave",
       label: "Leave current squad",
     });

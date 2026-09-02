@@ -9,12 +9,17 @@ import type {
   SquadMembership,
   TrackedRole,
   TemporaryVoiceChannel,
+  RoleRosterPage,
+  SquadLoadoutRole,
+  SquadLoadoutAssignment,
 } from "./types.js";
 
 interface GuildConfigRow {
   guild_id: string;
   role_roster_channel_id: string | null;
   squad_roster_channel_id: string | null;
+  squad_call_channel_id: string | null;
+  rank_update_channel_id: string | null;
   squad_leader_role_id: string | null;
   temporary_voice_lobby_channel_id: string | null;
   include_bots: number;
@@ -24,6 +29,8 @@ interface TrackedRoleRow {
   guild_id: string;
   role_id: string;
   sort_order: number;
+  page_id: number | null;
+  high_priority: number;
 }
 
 interface SquadRow {
@@ -77,6 +84,8 @@ export class RosterRepository {
         guild_id TEXT PRIMARY KEY,
         role_roster_channel_id TEXT,
         squad_roster_channel_id TEXT,
+        squad_call_channel_id TEXT,
+        rank_update_channel_id TEXT,
         squad_leader_role_id TEXT,
         temporary_voice_lobby_channel_id TEXT,
         include_bots INTEGER NOT NULL DEFAULT 0 CHECK (include_bots IN (0, 1)),
@@ -88,7 +97,18 @@ export class RosterRepository {
         guild_id TEXT NOT NULL,
         role_id TEXT NOT NULL,
         sort_order INTEGER NOT NULL,
+        page_id INTEGER,
+        high_priority INTEGER NOT NULL DEFAULT 0 CHECK (high_priority IN (0, 1)),
         PRIMARY KEY (guild_id, role_id),
+        FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS role_roster_pages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        UNIQUE (guild_id, name),
         FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
       ) STRICT;
 
@@ -164,6 +184,51 @@ export class RosterRepository {
         FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
       ) STRICT;
 
+      CREATE TABLE IF NOT EXISTS squad_loadout_roles (
+        squad_id INTEGER NOT NULL,
+        normalized_name TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role_count INTEGER NOT NULL CHECK (role_count >= 1),
+        instructions TEXT,
+        discord_role_id TEXT,
+        first_preference_role_id TEXT,
+        second_preference_role_id TEXT,
+        PRIMARY KEY (squad_id, normalized_name),
+        FOREIGN KEY (squad_id) REFERENCES squads(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS squad_loadout_assignments (
+        guild_id TEXT NOT NULL,
+        squad_id INTEGER NOT NULL,
+        user_id TEXT NOT NULL,
+        role_name TEXT NOT NULL,
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE,
+        FOREIGN KEY (squad_id) REFERENCES squads(id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS loadout_role_activity (
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        normalized_role_name TEXT NOT NULL,
+        role_name TEXT NOT NULL,
+        activity_seconds INTEGER NOT NULL DEFAULT 0 CHECK (activity_seconds >= 0),
+        PRIMARY KEY (guild_id, user_id, normalized_role_name),
+        FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS active_loadout_role_sessions (
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        squad_id INTEGER NOT NULL,
+        normalized_role_name TEXT NOT NULL,
+        role_name TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id) REFERENCES guild_config(guild_id) ON DELETE CASCADE,
+        FOREIGN KEY (squad_id) REFERENCES squads(id) ON DELETE CASCADE
+      ) STRICT;
+
       CREATE INDEX IF NOT EXISTS idx_tracked_roles_order
         ON tracked_roles(guild_id, sort_order);
       CREATE INDEX IF NOT EXISTS idx_squads_order
@@ -179,6 +244,12 @@ export class RosterRepository {
     if (!configColumns.some((column) => column.name === "temporary_voice_lobby_channel_id")) {
       this.database.exec("ALTER TABLE guild_config ADD COLUMN temporary_voice_lobby_channel_id TEXT;");
     }
+    if (!configColumns.some((column) => column.name === "squad_call_channel_id")) {
+      this.database.exec("ALTER TABLE guild_config ADD COLUMN squad_call_channel_id TEXT;");
+    }
+    if (!configColumns.some((column) => column.name === "rank_update_channel_id")) {
+      this.database.exec("ALTER TABLE guild_config ADD COLUMN rank_update_channel_id TEXT;");
+    }
     const voiceColumns = this.database.prepare("PRAGMA table_info(temporary_voice_channels)").all() as unknown as Array<{ name: string }>;
     if (!voiceColumns.some((column) => column.name === "squad_id")) {
       this.database.exec("ALTER TABLE temporary_voice_channels ADD COLUMN squad_id INTEGER;");
@@ -189,6 +260,44 @@ export class RosterRepository {
     }
     if (!activityColumns.some((column) => column.name === "manual_rank")) {
       this.database.exec("ALTER TABLE member_voice_activity ADD COLUMN manual_rank TEXT;");
+    }
+    const trackedColumns = this.database.prepare("PRAGMA table_info(tracked_roles)").all() as unknown as Array<{ name: string }>;
+    if (!trackedColumns.some((column) => column.name === "page_id")) {
+      this.database.exec("ALTER TABLE tracked_roles ADD COLUMN page_id INTEGER;");
+    }
+    if (!trackedColumns.some((column) => column.name === "high_priority")) {
+      this.database.exec("ALTER TABLE tracked_roles ADD COLUMN high_priority INTEGER NOT NULL DEFAULT 0;");
+    }
+    const loadoutTableSql = (this.database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'squad_loadout_roles'").get() as unknown as { sql: string } | undefined)?.sql ?? "";
+    if (loadoutTableSql.includes("BETWEEN 1 AND 6")) {
+      this.database.exec(`
+        ALTER TABLE squad_loadout_roles RENAME TO squad_loadout_roles_limited;
+        CREATE TABLE squad_loadout_roles (
+          squad_id INTEGER NOT NULL,
+          normalized_name TEXT NOT NULL,
+          name TEXT NOT NULL,
+          role_count INTEGER NOT NULL CHECK (role_count >= 1),
+          instructions TEXT,
+          discord_role_id TEXT,
+          first_preference_role_id TEXT,
+          second_preference_role_id TEXT,
+          PRIMARY KEY (squad_id, normalized_name),
+          FOREIGN KEY (squad_id) REFERENCES squads(id) ON DELETE CASCADE
+        ) STRICT;
+        INSERT INTO squad_loadout_roles (squad_id, normalized_name, name, role_count, instructions)
+          SELECT squad_id, normalized_name, name, role_count, instructions FROM squad_loadout_roles_limited;
+        DROP TABLE squad_loadout_roles_limited;
+      `);
+    }
+    const loadoutColumns = this.database.prepare("PRAGMA table_info(squad_loadout_roles)").all() as unknown as Array<{ name: string }>;
+    if (!loadoutColumns.some((column) => column.name === "discord_role_id")) {
+      this.database.exec("ALTER TABLE squad_loadout_roles ADD COLUMN discord_role_id TEXT;");
+    }
+    if (!loadoutColumns.some((column) => column.name === "first_preference_role_id")) {
+      this.database.exec("ALTER TABLE squad_loadout_roles ADD COLUMN first_preference_role_id TEXT;");
+    }
+    if (!loadoutColumns.some((column) => column.name === "second_preference_role_id")) {
+      this.database.exec("ALTER TABLE squad_loadout_roles ADD COLUMN second_preference_role_id TEXT;");
     }
   }
 
@@ -202,7 +311,7 @@ export class RosterRepository {
     this.ensureGuild(guildId);
     const row = this.database
       .prepare(`
-        SELECT guild_id, role_roster_channel_id, squad_roster_channel_id,
+        SELECT guild_id, role_roster_channel_id, squad_roster_channel_id, squad_call_channel_id, rank_update_channel_id,
                squad_leader_role_id, temporary_voice_lobby_channel_id, include_bots
         FROM guild_config
         WHERE guild_id = ?
@@ -213,6 +322,8 @@ export class RosterRepository {
       guildId: row.guild_id,
       roleRosterChannelId: row.role_roster_channel_id,
       squadRosterChannelId: row.squad_roster_channel_id,
+      squadCallChannelId: row.squad_call_channel_id,
+      rankUpdateChannelId: row.rank_update_channel_id,
       squadLeaderRoleId: row.squad_leader_role_id,
       temporaryVoiceLobbyChannelId: row.temporary_voice_lobby_channel_id,
       includeBots: row.include_bots === 1,
@@ -246,6 +357,38 @@ export class RosterRepository {
         WHERE guild_id = ?
       `)
       .run(channelId, guildId);
+  }
+
+  setSquadCallChannel(guildId: string, channelId: string | null): void {
+    this.ensureGuild(guildId);
+    this.database.prepare(`
+      UPDATE guild_config SET squad_call_channel_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE guild_id = ?
+    `).run(channelId, guildId);
+  }
+
+  setRankUpdateChannel(guildId: string, channelId: string | null): void {
+    this.ensureGuild(guildId);
+    this.database.prepare(`
+      UPDATE guild_config SET rank_update_channel_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE guild_id = ?
+    `).run(channelId, guildId);
+  }
+
+  clearRankUpdateChannelIfMatches(guildId: string, channelId: string): boolean {
+    const result = this.database.prepare(`
+      UPDATE guild_config SET rank_update_channel_id = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE guild_id = ? AND rank_update_channel_id = ?
+    `).run(guildId, channelId);
+    return Number(result.changes) > 0;
+  }
+
+  clearSquadCallChannelIfMatches(guildId: string, channelId: string): boolean {
+    const result = this.database.prepare(`
+      UPDATE guild_config SET squad_call_channel_id = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE guild_id = ? AND squad_call_channel_id = ?
+    `).run(guildId, channelId);
+    return Number(result.changes) > 0;
   }
 
   setSquadLeaderRole(guildId: string, roleId: string | null): void {
@@ -316,6 +459,11 @@ export class RosterRepository {
       INSERT OR IGNORE INTO active_voice_sessions (guild_id, user_id, squad_id, started_at)
       VALUES (?, ?, ?, ?)
     `).run(guildId, userId, squadId, startedAt);
+    const assignment = this.database.prepare(`
+      SELECT role_name FROM squad_loadout_assignments
+      WHERE guild_id = ? AND user_id = ? AND squad_id = ?
+    `).get(guildId, userId, squadId) as unknown as { role_name: string } | undefined;
+    if (assignment) this.beginLoadoutRoleActivity(guildId, userId, squadId, assignment.role_name, startedAt);
   }
 
   listActiveVoiceSessions(guildId: string): Array<{ userId: string; squadId: number }> {
@@ -330,6 +478,10 @@ export class RosterRepository {
       SELECT started_at FROM active_voice_sessions WHERE guild_id = ? AND user_id = ?
     `).get(guildId, userId) as unknown as { started_at: number } | undefined;
     if (!session) return 0;
+    const roleSession = this.database.prepare(`
+      SELECT normalized_role_name, role_name, started_at
+      FROM active_loadout_role_sessions WHERE guild_id = ? AND user_id = ?
+    `).get(guildId, userId) as unknown as { normalized_role_name: string; role_name: string; started_at: number } | undefined;
     const elapsed = Math.max(0, endedAt - session.started_at);
     this.database.exec("BEGIN IMMEDIATE;");
     try {
@@ -342,6 +494,18 @@ export class RosterRepository {
       this.database.prepare(
         "DELETE FROM active_voice_sessions WHERE guild_id = ? AND user_id = ?",
       ).run(guildId, userId);
+      if (roleSession) {
+        const roleElapsed = Math.max(0, endedAt - roleSession.started_at);
+        this.database.prepare(`
+          INSERT INTO loadout_role_activity (guild_id, user_id, normalized_role_name, role_name, activity_seconds)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(guild_id, user_id, normalized_role_name) DO UPDATE SET
+            role_name = excluded.role_name,
+            activity_seconds = activity_seconds + excluded.activity_seconds
+        `).run(guildId, userId, roleSession.normalized_role_name, roleSession.role_name, roleElapsed);
+        this.database.prepare("DELETE FROM active_loadout_role_sessions WHERE guild_id = ? AND user_id = ?")
+          .run(guildId, userId);
+      }
       this.database.exec("COMMIT;");
       return elapsed;
     } catch (error) {
@@ -354,7 +518,48 @@ export class RosterRepository {
     const row = this.database.prepare(`
       SELECT activity_seconds FROM member_voice_activity WHERE guild_id = ? AND user_id = ?
     `).get(guildId, userId) as unknown as { activity_seconds: number } | undefined;
-    return row?.activity_seconds ?? 0;
+    const active = this.database.prepare(`
+      SELECT started_at FROM active_voice_sessions WHERE guild_id = ? AND user_id = ?
+    `).get(guildId, userId) as unknown as { started_at: number } | undefined;
+    return (row?.activity_seconds ?? 0) + (active ? Math.max(0, Math.floor(Date.now() / 1000) - active.started_at) : 0);
+  }
+
+  beginLoadoutRoleActivity(guildId: string, userId: string, squadId: number, roleName: string, startedAt = Math.floor(Date.now() / 1000)): void {
+    this.database.prepare(`
+      INSERT OR IGNORE INTO active_loadout_role_sessions
+        (guild_id, user_id, squad_id, normalized_role_name, role_name, started_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(guildId, userId, squadId, roleName.toLocaleLowerCase("en-US"), roleName, startedAt);
+  }
+
+  endLoadoutRoleActivity(guildId: string, userId: string, endedAt = Math.floor(Date.now() / 1000)): number {
+    const session = this.database.prepare(`
+      SELECT normalized_role_name, role_name, started_at FROM active_loadout_role_sessions
+      WHERE guild_id = ? AND user_id = ?
+    `).get(guildId, userId) as unknown as { normalized_role_name: string; role_name: string; started_at: number } | undefined;
+    if (!session) return 0;
+    const elapsed = Math.max(0, endedAt - session.started_at);
+    this.database.prepare(`
+      INSERT INTO loadout_role_activity (guild_id, user_id, normalized_role_name, role_name, activity_seconds)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(guild_id, user_id, normalized_role_name) DO UPDATE SET
+        role_name = excluded.role_name, activity_seconds = activity_seconds + excluded.activity_seconds
+    `).run(guildId, userId, session.normalized_role_name, session.role_name, elapsed);
+    this.database.prepare("DELETE FROM active_loadout_role_sessions WHERE guild_id = ? AND user_id = ?").run(guildId, userId);
+    return elapsed;
+  }
+
+  getLoadoutRoleActivitySeconds(guildId: string, userId: string, roleName: string, now = Math.floor(Date.now() / 1000)): number {
+    const normalized = roleName.toLocaleLowerCase("en-US");
+    const stored = this.database.prepare(`
+      SELECT activity_seconds FROM loadout_role_activity
+      WHERE guild_id = ? AND user_id = ? AND normalized_role_name = ?
+    `).get(guildId, userId, normalized) as unknown as { activity_seconds: number } | undefined;
+    const active = this.database.prepare(`
+      SELECT started_at FROM active_loadout_role_sessions
+      WHERE guild_id = ? AND user_id = ? AND normalized_role_name = ?
+    `).get(guildId, userId, normalized) as unknown as { started_at: number } | undefined;
+    return (stored?.activity_seconds ?? 0) + (active ? Math.max(0, now - active.started_at) : 0);
   }
 
   getMemberRankState(guildId: string, userId: string): { activitySeconds: number; rankTrack: "enlisted" | "officer"; manualRank: string | null } {
@@ -514,12 +719,13 @@ export class RosterRepository {
     this.ensureGuild(guildId);
     const result = this.database
       .prepare(`
-        INSERT OR IGNORE INTO tracked_roles (guild_id, role_id, sort_order)
-        SELECT ?, ?, COALESCE(MAX(sort_order), -1) + 1
+        INSERT OR IGNORE INTO tracked_roles (guild_id, role_id, sort_order, page_id)
+        SELECT ?, ?, COALESCE(MAX(sort_order), -1) + 1,
+               (SELECT id FROM role_roster_pages WHERE guild_id = ? ORDER BY sort_order, id LIMIT 1)
         FROM tracked_roles
         WHERE guild_id = ?
       `)
-      .run(guildId, roleId, guildId);
+      .run(guildId, roleId, guildId, guildId);
     return Number(result.changes) > 0;
   }
 
@@ -549,6 +755,18 @@ export class RosterRepository {
     }
   }
 
+  reorderTrackedRoles(guildId: string, roleIds: readonly string[]): void {
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const update = this.database.prepare("UPDATE tracked_roles SET sort_order = ? WHERE guild_id = ? AND role_id = ?");
+      roleIds.forEach((roleId, index) => update.run(index, guildId, roleId));
+      this.database.exec("COMMIT;");
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
   clearTrackedRoles(guildId: string): number {
     const result = this.database
       .prepare("DELETE FROM tracked_roles WHERE guild_id = ?")
@@ -559,7 +777,7 @@ export class RosterRepository {
   listTrackedRoles(guildId: string): TrackedRole[] {
     const rows = this.database
       .prepare(`
-        SELECT guild_id, role_id, sort_order
+        SELECT guild_id, role_id, sort_order, page_id, high_priority
         FROM tracked_roles
         WHERE guild_id = ?
         ORDER BY sort_order, role_id
@@ -570,7 +788,88 @@ export class RosterRepository {
       guildId: row.guild_id,
       roleId: row.role_id,
       sortOrder: row.sort_order,
+      pageId: row.page_id,
+      highPriority: row.high_priority === 1,
     }));
+  }
+
+  listRoleRosterPages(guildId: string): RoleRosterPage[] {
+    const rows = this.database.prepare(`
+      SELECT id, guild_id, name, sort_order FROM role_roster_pages
+      WHERE guild_id = ? ORDER BY sort_order, id
+    `).all(guildId) as unknown as Array<{ id: number; guild_id: string; name: string; sort_order: number }>;
+    return rows.map((row) => ({ id: row.id, guildId: row.guild_id, name: row.name, sortOrder: row.sort_order }));
+  }
+
+  replaceRoleRosterSetup(
+    guildId: string,
+    channelId: string,
+    pages: ReadonlyArray<{ name: string; roles: ReadonlyArray<{ roleId: string; highPriority: boolean }> }>,
+  ): void {
+    this.ensureGuild(guildId);
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      this.database.prepare(`UPDATE guild_config SET role_roster_channel_id = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?`).run(channelId, guildId);
+      this.database.prepare("DELETE FROM tracked_roles WHERE guild_id = ?").run(guildId);
+      this.database.prepare("DELETE FROM role_roster_pages WHERE guild_id = ?").run(guildId);
+      const insertPage = this.database.prepare(`INSERT INTO role_roster_pages (guild_id, name, sort_order) VALUES (?, ?, ?)`);
+      const insertRole = this.database.prepare(`INSERT INTO tracked_roles (guild_id, role_id, sort_order, page_id, high_priority) VALUES (?, ?, ?, ?, ?)`);
+      let roleOrder = 0;
+      pages.forEach((page, pageIndex) => {
+        const result = insertPage.run(guildId, page.name, pageIndex);
+        const pageId = Number(result.lastInsertRowid);
+        page.roles.forEach((role) => insertRole.run(guildId, role.roleId, roleOrder++, pageId, role.highPriority ? 1 : 0));
+      });
+      this.database.exec("COMMIT;");
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  createRoleRosterPage(guildId: string, name: string): RoleRosterPage | null {
+    this.ensureGuild(guildId);
+    const cleanName = name.trim();
+    if (!cleanName || this.listRoleRosterPages(guildId).some((page) => page.name.toLocaleLowerCase("en-US") === cleanName.toLocaleLowerCase("en-US"))) return null;
+    const result = this.database.prepare(`
+      INSERT INTO role_roster_pages (guild_id, name, sort_order)
+      SELECT ?, ?, COALESCE(MAX(sort_order), -1) + 1 FROM role_roster_pages WHERE guild_id = ?
+    `).run(guildId, cleanName, guildId);
+    this.database.prepare("UPDATE tracked_roles SET page_id = ? WHERE guild_id = ? AND page_id IS NULL")
+      .run(Number(result.lastInsertRowid), guildId);
+    return this.listRoleRosterPages(guildId).find((page) => page.id === Number(result.lastInsertRowid)) ?? null;
+  }
+
+  removeRoleRosterPage(guildId: string, pageId: number): boolean {
+    const pages = this.listRoleRosterPages(guildId);
+    if (pages.length <= 1 || !pages.some((page) => page.id === pageId)) return false;
+    const fallback = pages.find((page) => page.id !== pageId)!;
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      this.database.prepare("UPDATE tracked_roles SET page_id = ? WHERE guild_id = ? AND page_id = ?").run(fallback.id, guildId, pageId);
+      this.database.prepare("DELETE FROM role_roster_pages WHERE guild_id = ? AND id = ?").run(guildId, pageId);
+      this.database.exec("COMMIT;");
+      return true;
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  moveTrackedRoleToPage(guildId: string, roleId: string, pageId: number): boolean {
+    const result = this.database.prepare(`
+      UPDATE tracked_roles SET page_id = ?
+      WHERE guild_id = ? AND role_id = ?
+        AND EXISTS (SELECT 1 FROM role_roster_pages WHERE guild_id = ? AND id = ?)
+    `).run(pageId, guildId, roleId, guildId, pageId);
+    return Number(result.changes) > 0;
+  }
+
+  setTrackedRolePriority(guildId: string, roleId: string, highPriority: boolean): boolean {
+    const result = this.database.prepare(`
+      UPDATE tracked_roles SET high_priority = ? WHERE guild_id = ? AND role_id = ?
+    `).run(highPriority ? 1 : 0, guildId, roleId);
+    return Number(result.changes) > 0;
   }
 
   createSquad(guildId: string, rawName: string, createdByUserId: string): Squad {
@@ -625,6 +924,9 @@ export class RosterRepository {
   }
 
   deleteSquad(guildId: string, squadId: number): boolean {
+    for (const assignment of this.listSquadLoadoutAssignments(guildId, squadId)) {
+      this.endLoadoutRoleActivity(guildId, assignment.userId);
+    }
     const result = this.database
       .prepare("DELETE FROM squads WHERE guild_id = ? AND id = ?")
       .run(guildId, squadId);
@@ -654,6 +956,126 @@ export class RosterRepository {
     return rows.map(mapSquad);
   }
 
+  setSquadLoadoutRole(
+    guildId: string,
+    squadId: number,
+    rawName: string,
+    percentage: number,
+    instructions: string | null,
+    discordRoleId: string | null = null,
+  ): boolean {
+    if (!this.getSquad(guildId, squadId)) return false;
+    const name = rawName.trim();
+    const normalizedName = name.toLocaleLowerCase("en-US");
+    if (!name || name.length > 100 || !Number.isSafeInteger(percentage) || percentage < 0 || percentage > 100) return false;
+    if (percentage === 0) {
+      this.database.prepare("DELETE FROM squad_loadout_roles WHERE squad_id = ? AND normalized_name = ?")
+        .run(squadId, normalizedName);
+      return true;
+    }
+    this.database.prepare(`
+      INSERT INTO squad_loadout_roles (squad_id, normalized_name, name, role_count, instructions, discord_role_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(squad_id, normalized_name) DO UPDATE SET
+        name = excluded.name, role_count = excluded.role_count, instructions = excluded.instructions,
+        discord_role_id = COALESCE(excluded.discord_role_id, squad_loadout_roles.discord_role_id)
+    `).run(squadId, normalizedName, name, percentage, instructions?.trim() || null, discordRoleId);
+    return true;
+  }
+
+  listSquadLoadoutRoles(guildId: string, squadId: number): SquadLoadoutRole[] {
+    if (!this.getSquad(guildId, squadId)) return [];
+    const rows = this.database.prepare(`
+      SELECT squad_id, normalized_name, name, role_count, instructions, discord_role_id,
+             first_preference_role_id, second_preference_role_id
+      FROM squad_loadout_roles WHERE squad_id = ? ORDER BY normalized_name
+    `).all(squadId) as unknown as Array<{ squad_id: number; normalized_name: string; name: string; role_count: number; instructions: string | null; discord_role_id: string | null; first_preference_role_id: string | null; second_preference_role_id: string | null }>;
+    return rows.map((row) => ({ squadId: row.squad_id, normalizedName: row.normalized_name, name: row.name, percentage: row.role_count, instructions: row.instructions, discordRoleId: row.discord_role_id, firstPreferenceRoleId: row.first_preference_role_id, secondPreferenceRoleId: row.second_preference_role_id }));
+  }
+
+  setSquadLoadoutPreferenceRole(
+    guildId: string,
+    squadId: number,
+    normalizedName: string,
+    preference: "first" | "second",
+    roleId: string,
+  ): boolean {
+    if (!this.getSquad(guildId, squadId)) return false;
+    const column = preference === "first" ? "first_preference_role_id" : "second_preference_role_id";
+    const result = this.database.prepare(`
+      UPDATE squad_loadout_roles SET ${column} = ? WHERE squad_id = ? AND normalized_name = ?
+    `).run(roleId, squadId, normalizedName);
+    return Number(result.changes) > 0;
+  }
+
+  replaceSquadLoadoutAssignments(
+    guildId: string,
+    squadId: number,
+    assignments: Array<{ userId: string; roleName: string }>,
+  ): boolean {
+    if (!this.getSquad(guildId, squadId)) return false;
+    for (const assignment of this.listSquadLoadoutAssignments(guildId, squadId)) {
+      this.endLoadoutRoleActivity(guildId, assignment.userId);
+    }
+    this.database.exec("BEGIN");
+    try {
+      this.database.prepare("DELETE FROM squad_loadout_assignments WHERE guild_id = ? AND squad_id = ?")
+        .run(guildId, squadId);
+      const insert = this.database.prepare(`
+        INSERT INTO squad_loadout_assignments (guild_id, squad_id, user_id, role_name)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(guild_id, user_id) DO UPDATE SET
+          squad_id = excluded.squad_id, role_name = excluded.role_name
+      `);
+      for (const assignment of assignments) {
+        insert.run(guildId, squadId, assignment.userId, assignment.roleName);
+      }
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    for (const assignment of assignments) {
+      const active = this.database.prepare(`
+        SELECT started_at FROM active_voice_sessions
+        WHERE guild_id = ? AND user_id = ? AND squad_id = ?
+      `).get(guildId, assignment.userId, squadId) as unknown as { started_at: number } | undefined;
+      if (active) this.beginLoadoutRoleActivity(guildId, assignment.userId, squadId, assignment.roleName);
+    }
+    return true;
+  }
+
+  listSquadLoadoutAssignments(guildId: string, squadId?: number): SquadLoadoutAssignment[] {
+    const rows = (squadId === undefined
+      ? this.database.prepare(`
+          SELECT guild_id, squad_id, user_id, role_name
+          FROM squad_loadout_assignments WHERE guild_id = ? ORDER BY squad_id, user_id
+        `).all(guildId)
+      : this.database.prepare(`
+          SELECT guild_id, squad_id, user_id, role_name
+          FROM squad_loadout_assignments WHERE guild_id = ? AND squad_id = ? ORDER BY user_id
+        `).all(guildId, squadId)) as unknown as Array<{ guild_id: string; squad_id: number; user_id: string; role_name: string }>;
+    return rows.map((row) => ({ guildId: row.guild_id, squadId: row.squad_id, userId: row.user_id, roleName: row.role_name }));
+  }
+
+  clearSquadLoadoutAssignments(guildId: string, squadId: number): number {
+    for (const assignment of this.listSquadLoadoutAssignments(guildId, squadId)) {
+      this.endLoadoutRoleActivity(guildId, assignment.userId);
+    }
+    const result = this.database.prepare(
+      "DELETE FROM squad_loadout_assignments WHERE guild_id = ? AND squad_id = ?",
+    ).run(guildId, squadId);
+    return Number(result.changes);
+  }
+
+  removeSquadLoadoutAssignment(guildId: string, userId: string): boolean {
+    this.endLoadoutRoleActivity(guildId, userId);
+    const result = this.database.prepare(
+      "DELETE FROM squad_loadout_assignments WHERE guild_id = ? AND user_id = ?",
+    ).run(guildId, userId);
+    return Number(result.changes) > 0;
+  }
+
   assignMember(
     guildId: string,
     userId: string,
@@ -665,6 +1087,7 @@ export class RosterRepository {
     }
 
     this.ensureGuild(guildId);
+    this.removeSquadLoadoutAssignment(guildId, userId);
     this.database
       .prepare(`
         INSERT INTO squad_memberships (
@@ -680,6 +1103,7 @@ export class RosterRepository {
   }
 
   unassignMember(guildId: string, userId: string): boolean {
+    this.removeSquadLoadoutAssignment(guildId, userId);
     const result = this.database
       .prepare("DELETE FROM squad_memberships WHERE guild_id = ? AND user_id = ?")
       .run(guildId, userId);

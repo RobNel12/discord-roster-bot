@@ -11,6 +11,10 @@ import type { Squad } from "./types.js";
 
 export const SQUAD_JOIN_CUSTOM_ID_PREFIX = "squad:v1:join:";
 export const SQUAD_LEAVE_CUSTOM_ID = "squad:v1:leave";
+export const SQUAD_CALL_CUSTOM_ID = "squad:v1:call";
+export const SQUAD_ASSIGN_LOADOUT_CUSTOM_ID = "squad:v1:assign-loadout";
+export const SQUAD_CLEAR_LOADOUT_CUSTOM_ID = "squad:v1:clear-loadout";
+export const SQUAD_CONFIG_LOADOUT_CUSTOM_ID = "squad:v1:config-loadout";
 export const MAX_INTERACTIVE_SQUADS = 100;
 
 const OPTIONS_PER_MENU = 25;
@@ -30,8 +34,8 @@ export function buildSquadControlRows(squads: Squad[]): SquadControlRow[] {
       .setCustomId(`${SQUAD_JOIN_CUSTOM_ID_PREFIX}${index}`)
       .setPlaceholder(
         chunks.length === 1
-          ? "✅ Join or move to a squad"
-          : `✅ Join or move to a squad (${index + 1}/${chunks.length})`,
+          ? "Join or move to a squad"
+          : `Join or move to a squad (${index + 1}/${chunks.length})`,
       )
       .setMinValues(1)
       .setMaxValues(1)
@@ -40,8 +44,7 @@ export function buildSquadControlRows(squads: Squad[]): SquadControlRow[] {
           new StringSelectMenuOptionBuilder()
             .setLabel(squad.name)
             .setValue(String(squad.id))
-            .setDescription(`Join or move to ${squad.name}`)
-            .setEmoji("✅"),
+            .setDescription(`Join or move to ${squad.name}`),
         ),
       );
     return new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(menu);
@@ -50,10 +53,25 @@ export function buildSquadControlRows(squads: Squad[]): SquadControlRow[] {
   const leaveButton = new ButtonBuilder()
     .setCustomId(SQUAD_LEAVE_CUSTOM_ID)
     .setLabel("Leave current squad")
-    .setEmoji("❌")
+    .setStyle(ButtonStyle.Danger);
+  const callButton = new ButtonBuilder()
+    .setCustomId(SQUAD_CALL_CUSTOM_ID)
+    .setLabel("Call my squad")
+    .setStyle(ButtonStyle.Primary);
+  const assignButton = new ButtonBuilder()
+    .setCustomId(SQUAD_ASSIGN_LOADOUT_CUSTOM_ID)
+    .setLabel("Assign loadouts")
+    .setStyle(ButtonStyle.Secondary);
+  const configButton = new ButtonBuilder()
+    .setCustomId(SQUAD_CONFIG_LOADOUT_CUSTOM_ID)
+    .setLabel("Configure loadout")
+    .setStyle(ButtonStyle.Secondary);
+  const clearButton = new ButtonBuilder()
+    .setCustomId(SQUAD_CLEAR_LOADOUT_CUSTOM_ID)
+    .setLabel("Clear assignments")
     .setStyle(ButtonStyle.Danger);
   rows.push(
-    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(leaveButton),
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(callButton, configButton, assignButton, clearButton, leaveButton),
   );
   return rows;
 }

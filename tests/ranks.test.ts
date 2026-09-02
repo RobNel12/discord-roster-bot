@@ -10,7 +10,7 @@ describe("voice activity ranks", () => {
     expect(rankForSeconds(7_200)).toBe("PFC");
     expect(rankForSeconds(Number.MAX_SAFE_INTEGER)).toBe("SGM");
     expect(ENLISTED_RANKS.map((rank) => rank.abbreviation)).toEqual([
-      "PVT", "PV2", "PFC", "SPC", "SGT", "SSG", "SFC", "MSG", "1SG", "SGM",
+      "PVT", "PV2", "PFC", "CPL", "SGT", "SSG", "SFC", "MSG", "1SG", "SGM",
     ]);
   });
 

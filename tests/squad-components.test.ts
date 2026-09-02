@@ -5,6 +5,10 @@ import {
   buildSquadControlRows,
   isSquadJoinCustomId,
   MAX_INTERACTIVE_SQUADS,
+  SQUAD_CALL_CUSTOM_ID,
+  SQUAD_ASSIGN_LOADOUT_CUSTOM_ID,
+  SQUAD_CONFIG_LOADOUT_CUSTOM_ID,
+  SQUAD_CLEAR_LOADOUT_CUSTOM_ID,
   SQUAD_JOIN_CUSTOM_ID_PREFIX,
   SQUAD_LEAVE_CUSTOM_ID,
 } from "../src/squad-components.js";
@@ -33,7 +37,7 @@ interface RawRow {
 }
 
 describe("squad component builders", () => {
-  it("builds a versioned join menu and a red leave button", () => {
+  it("builds a versioned join menu and a red leave button without emojis", () => {
     const rows = toRawRows(buildSquadControlRows([squad(1, "Alpha")]));
 
     expect(rows).toHaveLength(2);
@@ -43,7 +47,7 @@ describe("squad component builders", () => {
         {
           type: ComponentType.StringSelect,
           custom_id: `${SQUAD_JOIN_CUSTOM_ID_PREFIX}0`,
-          placeholder: "✅ Join or move to a squad",
+          placeholder: "Join or move to a squad",
           min_values: 1,
           max_values: 1,
           options: [
@@ -51,7 +55,6 @@ describe("squad component builders", () => {
               label: "Alpha",
               value: "1",
               description: "Join or move to Alpha",
-              emoji: { name: "✅" },
             },
           ],
         },
@@ -62,15 +65,42 @@ describe("squad component builders", () => {
       components: [
         {
           type: ComponentType.Button,
+          custom_id: SQUAD_CALL_CUSTOM_ID,
+          label: "Call my squad",
+          style: ButtonStyle.Primary,
+        },
+        {
+          type: ComponentType.Button,
+          custom_id: SQUAD_CONFIG_LOADOUT_CUSTOM_ID,
+          label: "Configure loadout",
+          style: ButtonStyle.Secondary,
+        },
+        {
+          type: ComponentType.Button,
+          custom_id: SQUAD_ASSIGN_LOADOUT_CUSTOM_ID,
+          label: "Assign loadouts",
+          style: ButtonStyle.Secondary,
+        },
+        {
+          type: ComponentType.Button,
+          custom_id: SQUAD_CLEAR_LOADOUT_CUSTOM_ID,
+          label: "Clear assignments",
+          style: ButtonStyle.Danger,
+        },
+        {
+          type: ComponentType.Button,
           custom_id: SQUAD_LEAVE_CUSTOM_ID,
           label: "Leave current squad",
-          emoji: { name: "❌" },
           style: ButtonStyle.Danger,
         },
       ],
     });
     expect(SQUAD_JOIN_CUSTOM_ID_PREFIX).toContain(":v1:");
     expect(SQUAD_LEAVE_CUSTOM_ID).toContain(":v1:");
+    expect(SQUAD_CALL_CUSTOM_ID).toContain(":v1:");
+    expect(SQUAD_ASSIGN_LOADOUT_CUSTOM_ID).toContain(":v1:");
+    expect(SQUAD_CONFIG_LOADOUT_CUSTOM_ID).toContain(":v1:");
+    expect(SQUAD_CLEAR_LOADOUT_CUSTOM_ID).toContain(":v1:");
   });
 
   it("uses four 25-option menus and never exposes more than 100 squads", () => {

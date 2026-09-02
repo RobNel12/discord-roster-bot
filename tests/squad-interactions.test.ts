@@ -3,6 +3,7 @@ import type {
   Guild,
   StringSelectMenuInteraction,
 } from "discord.js";
+import { ChannelType } from "discord.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RosterRepository } from "../src/database.js";
@@ -13,6 +14,7 @@ import {
 } from "../src/squad-interactions.js";
 import {
   SQUAD_JOIN_CUSTOM_ID_PREFIX,
+  SQUAD_CALL_CUSTOM_ID,
   SQUAD_LEAVE_CUSTOM_ID,
 } from "../src/squad-components.js";
 
@@ -28,6 +30,7 @@ interface InteractionMock {
   interaction: SquadInteraction;
   deferReply: ReturnType<typeof vi.fn>;
   editReply: ReturnType<typeof vi.fn>;
+  followUp: ReturnType<typeof vi.fn>;
 }
 
 describe("squad component interactions", () => {
@@ -54,6 +57,7 @@ describe("squad component interactions", () => {
           user: { bot: false },
         })),
       },
+      channels: { fetch: vi.fn(async () => null) },
     } as unknown as Guild;
     schedule = vi.fn();
     context = {
@@ -131,6 +135,37 @@ describe("squad component interactions", () => {
     expect(lastReply(second)).toContain("already Unassigned");
   });
 
+  it("lets an assigned squad manager publicly call the other squad members", async () => {
+    const alpha = repository.createSquad(GUILD_ID, "Alpha", "admin");
+    repository.setSquadLeaderRole(GUILD_ID, "leader-role");
+    repository.setSquadCallChannel(GUILD_ID, "calls-channel");
+    repository.assignMember(GUILD_ID, USER_ID, alpha.id, "admin");
+    repository.assignMember(GUILD_ID, "member-2", alpha.id, "admin");
+    repository.assignMember(GUILD_ID, "member-3", alpha.id, "admin");
+    (guild.members.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: USER_ID,
+      user: { bot: false },
+      permissions: { has: () => false },
+      roles: { cache: { has: (roleId: string) => roleId === "leader-role" } },
+    });
+    const send = vi.fn(async (_payload: unknown) => undefined);
+    (guild.channels.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "calls-channel",
+      type: ChannelType.GuildText,
+      send,
+    });
+    const mock = interactionMock("call", guild);
+
+    await handleSquadComponentInteraction(mock.interaction, context);
+
+    expect(mock.deferReply).toHaveBeenCalledWith({ flags: expect.anything() });
+    const payload = send.mock.calls[0]?.[0] as { content: string; allowedMentions: { users: string[] } } | undefined;
+    expect(payload?.content).toContain("**Alpha, form up!**");
+    expect(payload?.content).toContain("<@member-2>");
+    expect(payload?.content).toContain("<@member-3>");
+    expect(payload?.allowedMentions.users).toEqual([USER_ID, "member-2", "member-3"]);
+  });
+
   it.each([
     ["stale channel", { channelId: "old-squad-channel" }],
     ["stale message", { messageId: "old-squad-message" }],
@@ -195,7 +230,7 @@ function leaveInteraction(guild: Guild): InteractionMock {
 }
 
 function interactionMock(
-  kind: "join" | "leave",
+  kind: "join" | "leave" | "call",
   guild: Guild,
   overrides: {
     customId?: string;
@@ -207,10 +242,11 @@ function interactionMock(
 ): InteractionMock {
   const deferReply = vi.fn(async () => undefined);
   const editReply = vi.fn(async () => undefined);
+  const followUp = vi.fn(async () => undefined);
   const interaction = {
     customId:
       overrides.customId ??
-      (kind === "join" ? `${SQUAD_JOIN_CUSTOM_ID_PREFIX}0` : SQUAD_LEAVE_CUSTOM_ID),
+      (kind === "join" ? `${SQUAD_JOIN_CUSTOM_ID_PREFIX}0` : kind === "call" ? SQUAD_CALL_CUSTOM_ID : SQUAD_LEAVE_CUSTOM_ID),
     channelId: overrides.channelId ?? CHANNEL_ID,
     guildId: GUILD_ID,
     guild,
@@ -222,13 +258,14 @@ function interactionMock(
     user: { id: USER_ID },
     values: overrides.values ?? [],
     isStringSelectMenu: () => kind === "join",
-    isButton: () => kind === "leave",
+    isButton: () => kind === "leave" || kind === "call",
     inGuild: () => true,
     deferReply,
     editReply,
+    followUp,
     reply: vi.fn(async () => undefined),
   } as unknown as SquadInteraction;
-  return { interaction, deferReply, editReply };
+  return { interaction, deferReply, editReply, followUp };
 }
 
 function lastReply(mock: InteractionMock): string {

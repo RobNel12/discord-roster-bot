@@ -18,6 +18,33 @@ const rosterCommand = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("add-page")
+      .setDescription("Add a named page to the role roster")
+      .addStringOption((option) => option.setName("name").setDescription("Page name").setMinLength(1).setMaxLength(50).setRequired(true)),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("remove-page")
+      .setDescription("Remove a page and move its roles to another page")
+      .addStringOption((option) => option.setName("page").setDescription("Page to remove").setAutocomplete(true).setRequired(true))
+      .addBooleanOption((option) => option.setName("confirm").setDescription("Confirm page removal").setRequired(true)),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("move-role")
+      .setDescription("Move a tracked role to another roster page")
+      .addRoleOption((option) => option.setName("role").setDescription("Tracked role").setRequired(true))
+      .addStringOption((option) => option.setName("page").setDescription("Destination page").setAutocomplete(true).setRequired(true)),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("set-priority")
+      .setDescription("Change whether a tracked role is highlighted")
+      .addRoleOption((option) => option.setName("role").setDescription("Tracked role").setRequired(true))
+      .addBooleanOption((option) => option.setName("high-priority").setDescription("Highlight this role").setRequired(true)),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("set-channel")
       .setDescription("Choose the channel that will contain the role roster")
       .addChannelOption((option) =>
@@ -109,6 +136,30 @@ const squadCommand = new SlashCommandBuilder()
   .setDescription("Configure and manage the live squad roster")
   .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
   .setContexts(InteractionContextType.Guild)
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("set-call-channel")
+      .setDescription("Choose where squad call notifications are sent")
+      .addChannelOption((option) => option.setName("channel").setDescription("Squad call channel").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true)),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand.setName("clear-call-channel").setDescription("Disable squad call notifications"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("set-rank-channel")
+      .setDescription("Choose where automatic rank promotions are announced")
+      .addChannelOption((option) => option.setName("channel").setDescription("Rank update channel").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true)),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand.setName("clear-rank-channel").setDescription("Disable automatic rank promotion announcements"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("rank-progress")
+      .setDescription("Check logged squad voice time and progress toward the next rank")
+      .addUserOption((option) => option.setName("member").setDescription("Member to check; defaults to you")),
+  )
   .addSubcommand((subcommand) =>
     subcommand
       .setName("set-voice-lobby")

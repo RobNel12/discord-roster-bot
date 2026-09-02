@@ -61,6 +61,8 @@ describe("squad permissions", () => {
 
     await expect(missingRosterChannelPermissions(guild, channel)).resolves.toEqual([
       "Read Message History",
+      "Add Reactions",
+      "Manage Messages",
     ]);
   });
 

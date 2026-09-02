@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, type Interaction } from "discord.js";
+import { Client, Events, GatewayIntentBits, Partials, type Interaction } from "discord.js";
 
 import type { AppConfig } from "./config.js";
 import { handleAutocomplete, handleChatInputCommand } from "./commands.js";
@@ -9,6 +9,7 @@ import { handleSquadComponentInteraction } from "./squad-interactions.js";
 import { handleRosterSetupInteraction } from "./roster-setup-interactions.js";
 import type { RosterTarget } from "./types.js";
 import { TemporaryVoiceService } from "./temporary-voice.js";
+import { handleLoadoutConfigInteraction } from "./loadout-config-interactions.js";
 
 export class RosterBot {
   private readonly client = new Client({
@@ -16,7 +17,9 @@ export class RosterBot {
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.GuildMessageReactions,
     ],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
   });
   private readonly service: RosterService;
   private readonly scheduler: RosterScheduler;
@@ -98,6 +101,19 @@ export class RosterBot {
       this.track(this.temporaryVoice.handleVoiceStateUpdate(before, after));
     });
 
+    this.client.on(Events.MessageReactionAdd, (reaction, user) => {
+      if (user.bot || (reaction.emoji.name !== "⬅️" && reaction.emoji.name !== "➡️")) return;
+      this.track((async () => {
+        const completeReaction = reaction.partial ? await reaction.fetch() : reaction;
+        const message = completeReaction.message.partial ? await completeReaction.message.fetch() : completeReaction.message;
+        if (!message.guild) return;
+        const published = this.repository.getPublishedMessageById(message.guild.id, message.id);
+        if (!published || published.rosterType !== "role") return;
+        await this.service.turnRoleRosterPage(message.guild.id, reaction.emoji.name === "➡️" ? 1 : -1);
+        await completeReaction.users.remove(user.id).catch(() => undefined);
+      })());
+    });
+
     this.client.on(Events.GuildRoleUpdate, (_before, after) => {
       const tracked = this.repository
         .listTrackedRoles(after.guild.id)
@@ -132,6 +148,8 @@ export class RosterBot {
       const guildId = channel.guild.id;
       const roleChannel = this.repository.clearRoleRosterChannelIfMatches(guildId, channel.id);
       const squadChannel = this.repository.clearSquadRosterChannelIfMatches(guildId, channel.id);
+      const squadCallChannel = this.repository.clearSquadCallChannelIfMatches(guildId, channel.id);
+      const rankUpdateChannel = this.repository.clearRankUpdateChannelIfMatches(guildId, channel.id);
       const voiceLobby = this.repository.clearTemporaryVoiceLobbyChannelIfMatches(guildId, channel.id);
       this.repository.removeTemporaryVoiceChannel(guildId, channel.id);
       if (roleChannel || squadChannel) {
@@ -139,6 +157,8 @@ export class RosterBot {
         console.warn(`[roster] Cleared deleted roster channel ${channel.id} in guild ${guildId}.`);
       }
       if (voiceLobby) console.warn(`[voice] Cleared deleted voice lobby ${channel.id} in guild ${guildId}.`);
+      if (squadCallChannel) console.warn(`[squad] Cleared deleted squad call channel ${channel.id} in guild ${guildId}.`);
+      if (rankUpdateChannel) console.warn(`[rank] Cleared deleted rank update channel ${channel.id} in guild ${guildId}.`);
     });
 
     this.client.on(Events.UserUpdate, (_before, after) => {
@@ -188,13 +208,13 @@ export class RosterBot {
 
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
-      if (interaction.isChannelSelectMenu() || interaction.isRoleSelectMenu()) {
-        const handled = await handleRosterSetupInteraction(interaction, {
-          repository: this.repository,
-          scheduler: this.scheduler,
-        });
-        if (handled) return;
-      }
+      const loadoutConfigHandled = await handleLoadoutConfigInteraction(interaction, this.repository);
+      if (loadoutConfigHandled) return;
+      const rosterSetupHandled = await handleRosterSetupInteraction(interaction, {
+        repository: this.repository,
+        scheduler: this.scheduler,
+      });
+      if (rosterSetupHandled) return;
       if (interaction.isButton() || interaction.isStringSelectMenu()) {
         const handled = await handleSquadComponentInteraction(interaction, {
           repository: this.repository,

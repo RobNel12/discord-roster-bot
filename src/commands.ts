@@ -19,7 +19,7 @@ import type { RosterScheduler } from "./scheduler.js";
 import { SquadNameError } from "./squad-names.js";
 import { MAX_INTERACTIVE_SQUADS } from "./squad-components.js";
 import type { PublishedMessage, RosterTarget, RosterType } from "./types.js";
-import { isGeneralOfficerRank, isManualEnlistedRank, isOfficerRank, rankDisplayName, requiredSecondsForRank } from "./ranks.js";
+import { ENLISTED_RANKS, OFFICER_RANKS, isGeneralOfficerRank, isManualEnlistedRank, isOfficerRank, rankDisplayName, requiredSecondsForRank } from "./ranks.js";
 
 export interface CommandContext {
   repository: RosterRepository;
@@ -28,6 +28,10 @@ export interface CommandContext {
 }
 
 const squadAdminSubcommands = new Set([
+  "set-call-channel",
+  "clear-call-channel",
+  "set-rank-channel",
+  "clear-rank-channel",
   "set-channel",
   "set-leader-role",
   "clear-leader-role",
@@ -74,18 +78,29 @@ export async function handleAutocomplete(
   interaction: AutocompleteInteraction,
   repository: RosterRepository,
 ): Promise<void> {
-  if (interaction.commandName !== "squad" || !interaction.guildId) {
+  if (!interaction.guildId) {
     await interaction.respond([]);
     return;
   }
 
   const focused = interaction.options.getFocused(true);
+  const query = String(focused.value).toLocaleLowerCase("en-US");
+  if (interaction.commandName === "roster" && focused.name === "page") {
+    await interaction.respond(repository.listRoleRosterPages(interaction.guildId)
+      .filter((page) => page.name.toLocaleLowerCase("en-US").includes(query))
+      .slice(0, 25)
+      .map((page) => ({ name: page.name, value: String(page.id) })));
+    return;
+  }
+  if (interaction.commandName !== "squad") {
+    await interaction.respond([]);
+    return;
+  }
   if (focused.name !== "squad") {
     await interaction.respond([]);
     return;
   }
 
-  const query = String(focused.value).toLocaleLowerCase("en-US");
   const choices = repository
     .listSquads(interaction.guildId)
     .filter((squad) => squad.name.toLocaleLowerCase("en-US").includes(query))
@@ -114,9 +129,64 @@ async function handleRosterCommand(
         .setPlaceholder("Choose the roster channel")
         .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
       await interaction.editReply({
-        content: "**Role roster setup — Step 1 of 2**\nChoose the channel where the roster should be published.",
+        content: "**Role roster setup — Publication channel**\nChoose the channel where the named roster pages should be published.",
         components: [new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(channelSelect)],
       });
+      return;
+    }
+    case "add-page": {
+      const page = repository.createRoleRosterPage(guildId, interaction.options.getString("name", true));
+      if (!page) {
+        await reply(interaction, "Page names must be non-empty and unique.");
+        return;
+      }
+      const syncNote = await refreshAfterMutation(scheduler, guildId, "role");
+      await reply(interaction, `Added roster page **${escapeRosterText(page.name)}**.${syncNote}`);
+      return;
+    }
+    case "remove-page": {
+      if (!interaction.options.getBoolean("confirm", true)) {
+        await reply(interaction, "Page removal cancelled.");
+        return;
+      }
+      const pageId = parseSquadId(interaction.options.getString("page", true));
+      const pages = repository.listRoleRosterPages(guildId);
+      const page = pageId ? pages.find((candidate) => candidate.id === pageId) : undefined;
+      if (!page) {
+        await reply(interaction, "That roster page no longer exists.");
+        return;
+      }
+      if (pages.length <= 1) {
+        await reply(interaction, "The last roster page cannot be removed. Add another page first.");
+        return;
+      }
+      const fallback = pages.find((candidate) => candidate.id !== page.id)!;
+      repository.removeRoleRosterPage(guildId, page.id);
+      const syncNote = await refreshAfterMutation(scheduler, guildId, "role");
+      await reply(interaction, `Removed **${escapeRosterText(page.name)}**. Its tracked roles were moved to **${escapeRosterText(fallback.name)}**.${syncNote}`);
+      return;
+    }
+    case "move-role": {
+      const role = interaction.options.getRole("role", true);
+      const pageId = parseSquadId(interaction.options.getString("page", true));
+      const page = pageId ? repository.listRoleRosterPages(guildId).find((candidate) => candidate.id === pageId) : undefined;
+      if (!page || !repository.moveTrackedRoleToPage(guildId, role.id, page.id)) {
+        await reply(interaction, "Choose an existing page and a role that is already tracked.");
+        return;
+      }
+      const syncNote = await refreshAfterMutation(scheduler, guildId, "role");
+      await reply(interaction, `Moved <@&${role.id}> to **${escapeRosterText(page.name)}**.${syncNote}`);
+      return;
+    }
+    case "set-priority": {
+      const role = interaction.options.getRole("role", true);
+      const highPriority = interaction.options.getBoolean("high-priority", true);
+      if (!repository.setTrackedRolePriority(guildId, role.id, highPriority)) {
+        await reply(interaction, "That role is not currently tracked.");
+        return;
+      }
+      const syncNote = await refreshAfterMutation(scheduler, guildId, "role");
+      await reply(interaction, `${highPriority ? "Highlighted" : "Removed the highlight from"} <@&${role.id}>.${syncNote}`);
       return;
     }
     case "set-channel": {
@@ -169,7 +239,7 @@ async function handleRosterCommand(
         .filter((role): role is NonNullable<typeof role> => Boolean(role))
         .sort((a, b) => b.position - a.position || a.id.localeCompare(b.id))
         .map((role) => role.id);
-      repository.replaceTrackedRoles(guildId, sortedRoleIds);
+      repository.reorderTrackedRoles(guildId, sortedRoleIds);
       const syncNote = await refreshAfterMutation(scheduler, guildId, "role");
       await reply(
         interaction,
@@ -371,6 +441,58 @@ async function handleSquadCommand(
       return;
     }
 
+    if (subcommand === "set-call-channel") {
+      const selected = interaction.options.getChannel("channel", true);
+      const channel = await guild.channels.fetch(selected.id);
+      if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+        await reply(interaction, "Choose a server text or announcement channel.");
+        return;
+      }
+      const botMember = guild.members.me ?? await guild.members.fetchMe();
+      const permissions = channel.permissionsFor(botMember);
+      const missing = [
+        [PermissionFlagsBits.ViewChannel, "View Channel"],
+        [PermissionFlagsBits.SendMessages, "Send Messages"],
+      ] as const;
+      const missingNames = missing.filter(([permission]) => !permissions?.has(permission)).map(([, name]) => name);
+      if (missingNames.length) {
+        await reply(interaction, `The bot is missing these permissions in <#${channel.id}>: ${missingNames.join(", ")}.`);
+        return;
+      }
+      repository.setSquadCallChannel(guildId, channel.id);
+      await reply(interaction, `Squad calls will now be sent in <#${channel.id}>.`);
+      return;
+    }
+
+    if (subcommand === "clear-call-channel") {
+      repository.setSquadCallChannel(guildId, null);
+      await reply(interaction, "Squad call notifications are now disabled.");
+      return;
+    }
+
+    if (subcommand === "set-rank-channel") {
+      const selected = interaction.options.getChannel("channel", true);
+      const channel = await guild.channels.fetch(selected.id);
+      if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+        await reply(interaction, "Choose a server text or announcement channel.");
+        return;
+      }
+      const botMember = guild.members.me ?? await guild.members.fetchMe();
+      if (!channel.permissionsFor(botMember)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
+        await reply(interaction, "The bot needs View Channel and Send Messages in that channel.");
+        return;
+      }
+      repository.setRankUpdateChannel(guildId, channel.id);
+      await reply(interaction, `Automatic rank promotions will now be announced in <#${channel.id}>.`);
+      return;
+    }
+
+    if (subcommand === "clear-rank-channel") {
+      repository.setRankUpdateChannel(guildId, null);
+      await reply(interaction, "Automatic rank promotion announcements are now disabled.");
+      return;
+    }
+
     if (subcommand === "set-leader-role") {
       const role = interaction.options.getRole("role", true);
       if (role.id === guild.id || role.managed) {
@@ -465,6 +587,28 @@ async function handleSquadCommand(
       interaction,
       `The squad leader role was cleared. Server managers still have access.${syncNote}`,
     );
+    return;
+  }
+
+  if (subcommand === "rank-progress") {
+    const user = interaction.options.getUser("member") ?? interaction.user;
+    const member = await guild.members.fetch(user.id);
+    const config = repository.getGuildConfig(guildId);
+    const canReachGeneral = member.id === guild.ownerId || member.permissions.has(PermissionFlagsBits.ManageGuild);
+    const isOfficer = canReachGeneral || Boolean(config.squadLeaderRoleId && member.roles.cache.has(config.squadLeaderRoleId));
+    repository.ensureMemberRankTrack(guildId, user.id, isOfficer ? "officer" : "enlisted");
+    const state = repository.getMemberRankState(guildId, user.id);
+    const seconds = repository.getVoiceActivitySeconds(guildId, user.id);
+    const track = isOfficer
+      ? (canReachGeneral ? OFFICER_RANKS : OFFICER_RANKS.slice(0, 6))
+      : ENLISTED_RANKS;
+    const currentIndex = Math.max(0, track.findLastIndex((rank) => seconds >= rank.requiredSeconds));
+    const current = state.manualRank ?? track[currentIndex]!.abbreviation;
+    const next = state.manualRank ? undefined : track[currentIndex + 1];
+    const progress = next
+      ? Math.min(100, Math.floor((seconds - track[currentIndex]!.requiredSeconds) / (next.requiredSeconds - track[currentIndex]!.requiredSeconds) * 100))
+      : 100;
+    await reply(interaction, `<@${user.id}> has **${formatDuration(seconds)}** of logged squad voice time.\nCurrent rank: **${rankDisplayName(current)}**\n${next ? `Next rank: **${rankDisplayName(next.abbreviation)}** — **${progress}%** complete (${formatDuration(Math.max(0, next.requiredSeconds - seconds))} remaining)` : "This member is at the top of their current rank track."}`);
     return;
   }
 
@@ -690,6 +834,12 @@ function movePublicationIfCurrent(
 
 function truncate(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
+function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor(totalSeconds % 3_600 / 60);
+  return `${hours}h ${minutes}m`;
 }
 
 function pendingCleanupNote(

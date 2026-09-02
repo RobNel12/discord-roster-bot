@@ -7,6 +7,7 @@ import {
 
 import type { RosterRepository } from "./database.js";
 import type { RosterScheduler } from "./scheduler.js";
+import { officerRankForSeconds, rankDisplayName, rankForSeconds } from "./ranks.js";
 
 export class TemporaryVoiceService {
   private readonly pendingOwners = new Set<string>();
@@ -21,8 +22,12 @@ export class TemporaryVoiceService {
     const config = this.repository.getGuildConfig(guild.id);
 
     if (before.channelId && before.channelId !== after.channelId && before.member) {
+      const rankBefore = this.repository.getMemberRankState(guild.id, before.member.id);
       const elapsed = this.repository.endVoiceActivity(guild.id, before.member.id);
-      if (elapsed > 0) this.scheduler.schedule(guild.id, "squad");
+      if (elapsed > 0) {
+        this.scheduler.schedule(guild.id, "squad");
+        await this.announcePromotion(guild, before.member.id, rankBefore);
+      }
     }
 
     if (after.channelId && before.channelId !== after.channelId && after.member) {
@@ -46,6 +51,32 @@ export class TemporaryVoiceService {
     if (before.channelId && before.channelId !== after.channelId) {
       await this.deleteIfEmpty(guild, before.channelId);
     }
+  }
+
+  private async announcePromotion(guild: Guild, userId: string, before: { activitySeconds: number; rankTrack: "enlisted" | "officer"; manualRank: string | null }): Promise<void> {
+    if (before.manualRank) return;
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) return;
+    const canReachGeneral = member.id === guild.ownerId || member.permissions.has(PermissionFlagsBits.ManageGuild);
+    const after = this.repository.getMemberRankState(guild.id, userId);
+    if (after.manualRank) return;
+    const rankAt = (seconds: number) => before.rankTrack === "officer"
+      ? officerRankForSeconds(seconds, canReachGeneral)
+      : rankForSeconds(seconds);
+    const previousRank = rankAt(before.activitySeconds);
+    const nextRank = rankAt(after.activitySeconds);
+    if (previousRank === nextRank) return;
+    const channelId = this.repository.getGuildConfig(guild.id).rankUpdateChannelId;
+    if (!channelId) return;
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+      this.repository.clearRankUpdateChannelIfMatches(guild.id, channelId);
+      return;
+    }
+    await channel.send({
+      content: `Congratulations <@${userId}>! You have been promoted from **${rankDisplayName(previousRank)}** to **${rankDisplayName(nextRank)}**.`,
+      allowedMentions: { parse: [], users: [userId] },
+    }).catch((error: unknown) => console.error(`[rank] Could not announce promotion in guild ${guild.id}:`, error));
   }
 
   async reconcileGuild(guild: Guild): Promise<void> {

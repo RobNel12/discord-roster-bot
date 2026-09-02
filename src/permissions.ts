@@ -12,6 +12,8 @@ const channelPermissionChecks = [
   [PermissionFlagsBits.SendMessages, "Send Messages"],
   [PermissionFlagsBits.EmbedLinks, "Embed Links"],
   [PermissionFlagsBits.ReadMessageHistory, "Read Message History"],
+  [PermissionFlagsBits.AddReactions, "Add Reactions"],
+  [PermissionFlagsBits.ManageMessages, "Manage Messages"],
 ] as const;
 
 export function isServerManager(interaction: ChatInputCommandInteraction): boolean {
