@@ -3,6 +3,7 @@ export interface OperationPost {
   guildId: string;
   channelId: string;
   messageIds: string[];
+  announcementMessageIds?: string[];
   kind: "summons" | "operation";
   title: string;
   description: string;
