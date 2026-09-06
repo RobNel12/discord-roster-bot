@@ -183,15 +183,19 @@ export async function handleOperationInteraction(interaction: Interaction, repos
         post.responses[member.id] = action as "going" | "maybe" | "unavailable";
       } else throw new Error("Unknown control.");
 
-      // Delete the summon messages if closing a squad summons
+      // Delete summon messages and ping messages if closing a squad summons
       if (post.kind === "summons" && action === "close") {
         const channel = await guild.channels.fetch(post.channelId).catch(() => null);
         if (channel && channel.isTextBased()) {
-          for (const msgId of post.messageIds) {
-            await channel.messages.delete(msgId).catch(() => null);
+          const targets = [...post.messageIds, ...(post.announcementMessageIds ?? [])];
+          for (const msgId of targets) {
+            await channel.messages.delete(msgId).catch((err: unknown) => {
+              console.error(`[summons] Failed to delete message ${msgId}:`, err);
+            });
           }
         }
         post.messageIds = [];
+        if (post.announcementMessageIds) post.announcementMessageIds = [];
       }
 
       repository.saveOperationPost(post);
