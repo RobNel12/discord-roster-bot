@@ -220,11 +220,6 @@ export async function handleSquadComponentInteraction(
     }
 
     if (isLeave) {
-      const membership = repository.getMembership(guildId, member.id);
-      if (membership && repository.isSquadLocked(guildId, membership.squadId)) {
-        await editReply(interaction, "Your squad is locked for its summons. Ask a squad manager to unlock it or change your assignment.");
-        return true;
-      }
       repository.endVoiceActivity(guildId, member.id);
       const removed = repository.unassignMember(guildId, member.id);
       if (!removed) {
@@ -263,8 +258,8 @@ export async function handleSquadComponentInteraction(
       return true;
     }
 
-    if (repository.isSquadLocked(guildId, squad.id) || (currentMembership && repository.isSquadLocked(guildId, currentMembership.squadId))) {
-      await editReply(interaction, "That move involves a locked squad. Ask a squad manager to unlock it or change your assignment.");
+    if (repository.isSquadLocked(guildId, squad.id)) {
+      await editReply(interaction, "That squad is locked to new members. Ask a squad manager to unlock it or change your assignment.");
       return true;
     }
 

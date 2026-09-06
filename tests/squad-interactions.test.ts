@@ -70,19 +70,31 @@ describe("squad component interactions", () => {
     repository.close();
   });
 
-  it.each(["join", "move", "leave"])("blocks self-service %s involving a locked squad", async (action) => {
+  it.each([
+    ["join", false, false],
+    ["move into locked squad", false, false],
+    ["move out", true, false],
+    ["move between locked squads", false, true],
+    ["leave", true, false],
+  ] as const)("handles %s with an entry-only lock", async (action, allowed, lockDestination) => {
     const alpha = repository.createSquad(GUILD_ID, "Alpha", "admin");
     const bravo = repository.createSquad(GUILD_ID, "Bravo", "admin");
-    if (action !== "join") repository.assignMember(GUILD_ID, USER_ID, alpha.id, "admin");
-    repository.saveOperationPost({ id: "lock", guildId: GUILD_ID, channelId: "calls", messageIds: [], kind: "summons", title: "Alpha", description: "", startsAt: null, squadId: alpha.id, memberIds: [], responses: {}, ready: {}, phase: "ready", squadLocked: true });
-    const mock = action === "leave" ? interactionMock("leave", guild) : joinInteraction(guild, String(action === "join" ? alpha.id : bravo.id));
+    const initial = action === "join" ? undefined : action === "move into locked squad" ? bravo.id : alpha.id;
+    if (initial) repository.assignMember(GUILD_ID, USER_ID, initial, "admin");
+    for (const squadId of lockDestination ? [alpha.id, bravo.id] : [alpha.id]) {
+      repository.saveOperationPost({ id: `lock-${squadId}`, guildId: GUILD_ID, channelId: "calls", messageIds: [], kind: "summons", title: "Squad", description: "", startsAt: null, squadId, memberIds: [], responses: {}, ready: {}, phase: "ready", squadLocked: true });
+    }
+    const destination = action === "join" || action === "move into locked squad" ? alpha.id : bravo.id;
+    const mock = action === "leave" ? interactionMock("leave", guild) : joinInteraction(guild, String(destination));
     await handleSquadComponentInteraction(mock.interaction, context);
-    expect(repository.getMembership(GUILD_ID, USER_ID)?.squadId).toBe(action === "join" ? undefined : alpha.id);
-    expect(schedule).not.toHaveBeenCalled();
-    expect(JSON.stringify(mock.editReply.mock.calls)).toContain("locked");
-    // Explicit manager assignments continue to work while the squad is locked.
-    repository.assignMember(GUILD_ID, USER_ID, bravo.id, "admin");
-    expect(repository.getMembership(GUILD_ID, USER_ID)?.squadId).toBe(bravo.id);
+    expect(repository.getMembership(GUILD_ID, USER_ID)?.squadId).toBe(allowed ? action === "leave" ? undefined : destination : initial);
+    if (allowed) expect(schedule).toHaveBeenCalledWith(GUILD_ID, "squad");
+    else {
+      expect(schedule).not.toHaveBeenCalled();
+      expect(JSON.stringify(mock.editReply.mock.calls)).toContain("locked to new members");
+    }
+    repository.assignMember(GUILD_ID, USER_ID, alpha.id, "admin");
+    expect(repository.getMembership(GUILD_ID, USER_ID)?.squadId).toBe(alpha.id);
   });
 
   it("joins a squad from the select menu", async () => {

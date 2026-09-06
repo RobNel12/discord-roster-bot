@@ -6,7 +6,7 @@ See [README.md](README.md) for installation, permissions, deployment, and troubl
 
 - **Server managers:** members with Manage Server. They configure publications, the leader role, voice lobby, announcement channels, and manual ranks.
 - **Squad managers:** server managers or members with the exact configured squad leader role. They manage squads and create operations.
-- **Members:** everyone can list squads, check rank progress, and use self-service membership controls unless a squad is locked.
+- **Members:** everyone can list squads, check rank progress, and use self-service membership controls. Locked squads reject new joins but allow current members to leave.
 
 Select autocomplete results for squad and page arguments; the bot uses their IDs internally. Optional arguments are marked below. Replace example dates with a future date.
 
@@ -63,8 +63,8 @@ Select autocomplete results for squad and page arguments; the bot uses their IDs
 | Control | Access | Behavior |
 | --- | --- | --- |
 | ⬅️ / ➡️ on the role roster | Everyone | Switch between named role-roster views. |
-| Join or move to a squad | Everyone | Replaces your previous assignment. Moves involving a locked squad are blocked. Up to 100 squads appear in the menus. |
-| Leave current squad | Everyone | Moves you to Unassigned unless your squad is locked. |
+| Join or move to a squad | Everyone | Replaces your previous assignment. Moving into a locked squad is blocked; moving out to an unlocked squad is allowed. Up to 100 squads appear in the menus. |
+| Leave current squad | Everyone | Moves you to Unassigned, including when your squad is locked. |
 | Call my squad | Squad manager assigned to a squad | Posts the squad summons and pings members once in the configured call channel. One open summons per squad; one-minute cooldown. |
 | Configure loadout | Squad manager assigned to a squad | Opens a private configuration panel for percentages, preference roles, and instructions. |
 | Assign loadouts | Squad manager in their squad's temporary voice channel | Assigns loadouts to members in voice, sends DMs, and displays assignments on the roster. |
@@ -80,8 +80,8 @@ The orange summons embed shows the squad's members, ranks, loadouts, readiness, 
 | --- | --- | --- |
 | ✅ reaction | Current squad member | Marks you ready. |
 | ❌ reaction | Current squad member | Marks you not ready. |
-| 🔓 button | Squad manager assigned to this squad, or server manager | Locks self-service joins, moves, and leaves. The button changes to 🔒. |
-| 🔒 button | Squad manager assigned to this squad, or server manager | Unlocks membership changes. The button changes to 🔓. |
+| 🔓 button | Squad manager assigned to this squad, or server manager | Blocks self-service joins and moves into the squad. Current members can leave or move out. The button changes to 🔒. |
+| 🔒 button | Squad manager assigned to this squad, or server manager | Allows self-service joins again. The button changes to 🔓. |
 | Close squad summons | Squad manager | Freezes the final roster and readiness, removes buttons, and releases the squad lock. |
 
 The main squad roster also shows each squad's current lock emoji. Explicit `/squad assign` and `/squad unassign` commands still work while locked. Locks do not change voice-channel permissions or prevent readiness responses.
