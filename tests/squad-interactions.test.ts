@@ -70,6 +70,21 @@ describe("squad component interactions", () => {
     repository.close();
   });
 
+  it.each(["join", "move", "leave"])("blocks self-service %s involving a locked squad", async (action) => {
+    const alpha = repository.createSquad(GUILD_ID, "Alpha", "admin");
+    const bravo = repository.createSquad(GUILD_ID, "Bravo", "admin");
+    if (action !== "join") repository.assignMember(GUILD_ID, USER_ID, alpha.id, "admin");
+    repository.saveOperationPost({ id: "lock", guildId: GUILD_ID, channelId: "calls", messageIds: [], kind: "summons", title: "Alpha", description: "", startsAt: null, squadId: alpha.id, memberIds: [], responses: {}, ready: {}, phase: "ready", squadLocked: true });
+    const mock = action === "leave" ? interactionMock("leave", guild) : joinInteraction(guild, String(action === "join" ? alpha.id : bravo.id));
+    await handleSquadComponentInteraction(mock.interaction, context);
+    expect(repository.getMembership(GUILD_ID, USER_ID)?.squadId).toBe(action === "join" ? undefined : alpha.id);
+    expect(schedule).not.toHaveBeenCalled();
+    expect(JSON.stringify(mock.editReply.mock.calls)).toContain("locked");
+    // Explicit manager assignments continue to work while the squad is locked.
+    repository.assignMember(GUILD_ID, USER_ID, bravo.id, "admin");
+    expect(repository.getMembership(GUILD_ID, USER_ID)?.squadId).toBe(bravo.id);
+  });
+
   it("joins a squad from the select menu", async () => {
     const alpha = repository.createSquad(GUILD_ID, "Alpha", "admin");
     const mock = joinInteraction(guild, String(alpha.id));
@@ -148,9 +163,10 @@ describe("squad component interactions", () => {
       permissions: { has: () => false },
       roles: { cache: { has: (roleId: string) => roleId === "leader-role" } },
     });
-    const send = vi.fn(async (_payload: unknown) => undefined);
+    const send = vi.fn(async (_payload: unknown) => ({ id: "summons-1", react: vi.fn() }));
     (guild.channels.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "calls-channel",
+      isTextBased: () => true,
       type: ChannelType.GuildText,
       send,
     });
@@ -159,11 +175,15 @@ describe("squad component interactions", () => {
     await handleSquadComponentInteraction(mock.interaction, context);
 
     expect(mock.deferReply).toHaveBeenCalledWith({ flags: expect.anything() });
-    const payload = send.mock.calls[0]?.[0] as { content: string; allowedMentions: { users: string[] } } | undefined;
-    expect(payload?.content).toContain("**Alpha, form up!**");
-    expect(payload?.content).toContain("<@member-2>");
-    expect(payload?.content).toContain("<@member-3>");
-    expect(payload?.allowedMentions.users).toEqual([USER_ID, "member-2", "member-3"]);
+    const payload = send.mock.calls[0]?.[0] as { content: string; embeds: Array<{ toJSON(): { title?: string; fields?: Array<{ value: string }> } }>; allowedMentions: unknown };
+    expect(payload.content).toBe("");
+    expect(payload.embeds[0]?.toJSON().title).toContain("Alpha, form up");
+    const roster = payload.embeds[0]?.toJSON().fields?.map(field => field.value).join("\n");
+    expect(roster).toContain("<@member-2>");
+    expect(roster).toContain("<@member-3>");
+    expect(payload.allowedMentions).toEqual({ parse: [] });
+    expect(send.mock.calls[1]?.[0]).toMatchObject({ allowedMentions: { users: [USER_ID, "member-2", "member-3"] } });
+    expect(repository.getOperationPosts(GUILD_ID)[0]?.messageIds).toEqual(["summons-1"]);
   });
 
   it.each([

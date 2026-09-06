@@ -1,3 +1,4 @@
+import { rankDisplayName } from "../ranks.js";
 import { EmbedBuilder } from "discord.js";
 
 export interface RosterSection {
@@ -130,4 +131,10 @@ function splitLongLine(line: string): string[] {
     parts.push(line.slice(offset, offset + FIELD_VALUE_LIMIT));
   }
   return parts;
+}
+
+export function memberLine(member: { id: string }, rank?: string, loadoutRole?: string): string {
+  const details = [rank ? rankDisplayName(rank) : null, loadoutRole ? escapeRosterText(loadoutRole) : null]
+    .filter((detail): detail is string => Boolean(detail));
+  return `• <@${member.id}>${details.length ? ` — ${details.map((detail) => `**${detail}**`).join(" · ")}` : ""}`;
 }

@@ -1,0 +1,6 @@
+[Unit]
+Description=Daily restart of Discord roster bot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart discord-roster-bot.service

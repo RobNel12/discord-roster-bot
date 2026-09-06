@@ -150,8 +150,8 @@ describe("RosterService", () => {
 
     const fields = harness.publications[0]?.pages[0]?.toJSON().fields ?? [];
     expect(fields.map((field) => field.name)).toEqual([
-      "Alpha — 1",
-      "Bravo — 0",
+      "🔓 Alpha — 1",
+      "🔓 Bravo — 0",
       "Unassigned — 1",
     ]);
     expect(fields[0]?.value).toBe("• <@200000000000000002> — **Pvt.** · **Medic**");

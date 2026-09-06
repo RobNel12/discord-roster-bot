@@ -534,7 +534,7 @@ async function handleSquadCommand(
         return;
       }
       repository.setTemporaryVoiceLobbyChannel(guildId, channel.id);
-      await reply(interaction, `Joining <#${channel.id}> will now create temporary voice channels for server managers and squad leaders.`);
+      await reply(interaction, `Joining <#${channel.id}> will now create or reuse one temporary voice channel for any member's assigned squad.`);
       return;
     }
 

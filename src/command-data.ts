@@ -294,5 +294,14 @@ const squadCommand = new SlashCommandBuilder()
     subcommand.setName("refresh").setDescription("Reconcile and republish the squad roster"),
   );
 
-export const commandData = [rosterCommand, squadCommand] as const;
+const operationCommand = new SlashCommandBuilder()
+  .setName("operation").setDescription("Schedule an operation with sign-ups and a ready check")
+  .setIntegrationTypes(ApplicationIntegrationType.GuildInstall).setContexts(InteractionContextType.Guild)
+  .addSubcommand(sub => sub.setName("create").setDescription("Post operation sign-ups (squad managers)")
+    .addStringOption(o => o.setName("name").setDescription("Operation name").setMaxLength(100).setRequired(true))
+    .addStringOption(o => o.setName("starts").setDescription("Date with timezone, e.g. 2026-09-12T19:00:00-07:00").setRequired(true))
+    .addChannelOption(o => o.setName("channel").setDescription("Sign-up channel").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
+    .addStringOption(o => o.setName("description").setDescription("Briefing or instructions").setMaxLength(600)));
+
+export const commandData = [rosterCommand, squadCommand, operationCommand] as const;
 export const commandJson = commandData.map((command) => command.toJSON());

@@ -1,5 +1,7 @@
 import {
   ChannelType,
+  OverwriteType,
+  type VoiceChannel,
   PermissionFlagsBits,
   type Guild,
   type VoiceState,
@@ -10,7 +12,8 @@ import type { RosterScheduler } from "./scheduler.js";
 import { ENLISTED_RANKS, OFFICER_RANKS, rankDisplayName } from "./ranks.js";
 
 export class TemporaryVoiceService {
-  private readonly pendingOwners = new Set<string>();
+  private readonly pendingSquads = new Map<string, Promise<void>>();
+  private readonly accessQueues = new Map<string, Promise<void>>();
   private readonly rankTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
@@ -113,7 +116,62 @@ export class TemporaryVoiceService {
     }).catch((error: unknown) => console.error(`[rank] Could not announce promotion in guild ${guild.id}:`, error));
   }
 
+  async syncGuildPermissions(guild: Guild): Promise<void> {
+    for (const record of this.repository.listTemporaryVoiceChannels(guild.id)) {
+      if (record.squadId === null) continue;
+      try {
+        const channel = await guild.channels.fetch(record.channelId);
+        if (channel?.type === ChannelType.GuildVoice) await this.syncChannelPermissions(channel, record.squadId);
+      } catch (error) { console.error(`[voice] Could not sync squad access for ${record.channelId}:`, error); }
+    }
+  }
+
+  private async trySyncChannelPermissions(channel: VoiceChannel, squadId: number): Promise<void> {
+    try {
+      await this.syncChannelPermissions(channel, squadId);
+    } catch (error) {
+      const missingPermissions = (error as { code?: number } | null)?.code === 50013;
+      console.warn(
+        `[voice] Could not update squad access for ${channel.id}. ${missingPermissions
+          ? "Grant the bot Manage Permissions in the voice category, plus View Channel and Connect."
+          : "Permission synchronization will retry on the next roster refresh."} Continuing with existing channel permissions.`,
+        error,
+      );
+    }
+  }
+
+  private async syncChannelPermissions(channel: VoiceChannel, squadId: number): Promise<void> {
+    const key = channel.id;
+    const previous = this.accessQueues.get(key) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(async () => {
+      const guildId = channel.guild.id;
+      const members = new Set(this.repository.listMemberships(guildId).filter(m => m.squadId === squadId).map(m => m.userId));
+      for (const grant of this.repository.listVoiceAccessGrants(guildId, channel.id)) {
+        if (members.has(grant.userId)) continue;
+        if (channel.permissionOverwrites.cache.has(grant.userId)) {
+          await channel.permissionOverwrites.edit(grant.userId, {
+            ViewChannel: grant.view === null ? null : Boolean(grant.view),
+            Connect: grant.connect === null ? null : Boolean(grant.connect),
+          }, { type: OverwriteType.Member, reason: "Restoring access after squad departure" });
+        }
+        this.repository.removeVoiceAccessGrant(guildId, channel.id, grant.userId);
+      }
+      for (const userId of members) {
+        const overwrite = channel.permissionOverwrites.cache.get(userId);
+        const original = (flag: bigint) => overwrite?.allow.has(flag) ? 1 : overwrite?.deny.has(flag) ? 0 : null;
+        this.repository.saveVoiceAccessGrant(guildId, channel.id, userId, original(PermissionFlagsBits.ViewChannel), original(PermissionFlagsBits.Connect));
+        if (overwrite?.allow.has(PermissionFlagsBits.ViewChannel) && overwrite.allow.has(PermissionFlagsBits.Connect)) continue;
+        await channel.permissionOverwrites.edit(userId, { ViewChannel: true, Connect: true }, {
+          type: OverwriteType.Member, reason: "Allowing assigned squad members to see and join squad voice",
+        });
+      }
+    });
+    this.accessQueues.set(key, next);
+    try { await next; } finally { if (this.accessQueues.get(key) === next) this.accessQueues.delete(key); }
+  }
+
   async reconcileGuild(guild: Guild): Promise<void> {
+    await this.syncGuildPermissions(guild);
     const activeUsers = new Set<string>();
     for (const record of this.repository.listTemporaryVoiceChannels(guild.id)) {
       const channel = await guild.channels.fetch(record.channelId).catch(() => null);
@@ -152,54 +210,59 @@ export class TemporaryVoiceService {
   private async createForMember(state: VoiceState): Promise<void> {
     const member = state.member;
     if (!member || member.user.bot) return;
-    const key = `${state.guild.id}:${member.id}`;
-    if (this.pendingOwners.has(key)) return;
-    this.pendingOwners.add(key);
+    const config = this.repository.getGuildConfig(state.guild.id);
+    const lobby = state.channel;
+    if (!lobby || lobby.id !== config.temporaryVoiceLobbyChannelId) return;
+    const membership = this.repository.getMembership(state.guild.id, member.id);
+    const squad = membership ? this.repository.getSquad(state.guild.id, membership.squadId) : null;
+    if (!squad) return;
+    const key = `${state.guild.id}:${squad.id}`;
+    const pending = this.pendingSquads.get(key);
+    if (pending) {
+      await pending;
+      await this.moveToExistingSquadChannel(state.guild, member, squad.id);
+      return;
+    }
 
-    try {
-      const config = this.repository.getGuildConfig(state.guild.id);
-      const isManager = member.permissions.has(PermissionFlagsBits.ManageGuild);
-      const isSquadLeader = Boolean(
-        config.squadLeaderRoleId && member.roles.cache.has(config.squadLeaderRoleId),
-      );
-      if (!isManager && !isSquadLeader) return;
-
-      const membership = this.repository.getMembership(state.guild.id, member.id);
-      const squad = membership ? this.repository.getSquad(state.guild.id, membership.squadId) : null;
-      if (isSquadLeader && !isManager && !squad) return;
-      const channelName = (squad?.name ?? `${member.displayName}'s Channel`).slice(0, 100);
-
-      const existing = this.repository.getTemporaryVoiceChannelForOwner(state.guild.id, member.id);
-      if (existing) {
-        const channel = await state.guild.channels.fetch(existing.channelId).catch(() => null);
-        if (channel?.type === ChannelType.GuildVoice) {
-          await member.voice.setChannel(channel, "Returning to owned temporary voice channel");
-          return;
-        }
-        this.repository.removeTemporaryVoiceChannel(state.guild.id, existing.channelId);
-      }
-
-      const lobby = state.channel;
-      if (!lobby || lobby.id !== config.temporaryVoiceLobbyChannelId) return;
+    const creation = (async () => {
+      if (await this.moveToExistingSquadChannel(state.guild, member, squad.id)) return;
       const channel = await state.guild.channels.create({
-        name: channelName,
+        name: squad.name.slice(0, 100),
         type: ChannelType.GuildVoice,
         parent: lobby.parentId,
         reason: `Temporary voice channel requested by ${member.user.tag}`,
       });
-      this.repository.upsertTemporaryVoiceChannel(state.guild.id, channel.id, member.id, squad?.id ?? null);
+      this.repository.upsertTemporaryVoiceChannel(state.guild.id, channel.id, member.id, squad.id);
       try {
+        await this.trySyncChannelPermissions(channel, squad.id);
         await member.voice.setChannel(channel, "Moving member into temporary voice channel");
       } catch (error) {
         this.repository.removeTemporaryVoiceChannel(state.guild.id, channel.id);
         await channel.delete("Temporary channel owner could not be moved").catch(() => undefined);
         throw error;
       }
+    })();
+    this.pendingSquads.set(key, creation);
+    try {
+      await creation;
     } catch (error) {
       console.error(`[voice] Temporary channel creation failed for ${member.id} in guild ${state.guild.id}:`, error);
     } finally {
-      this.pendingOwners.delete(key);
+      if (this.pendingSquads.get(key) === creation) this.pendingSquads.delete(key);
     }
+  }
+
+  private async moveToExistingSquadChannel(guild: Guild, member: NonNullable<VoiceState["member"]>, squadId: number): Promise<boolean> {
+    const existing = this.repository.getTemporaryVoiceChannelForSquad(guild.id, squadId);
+    if (!existing) return false;
+    const channel = await guild.channels.fetch(existing.channelId).catch(() => null);
+    if (channel?.type === ChannelType.GuildVoice) {
+      await this.trySyncChannelPermissions(channel, squadId);
+      await member.voice.setChannel(channel, "Joining existing temporary squad voice channel");
+      return true;
+    }
+    this.repository.removeTemporaryVoiceChannel(guild.id, existing.channelId);
+    return false;
   }
 
   private async deleteIfEmpty(guild: Guild, channelId: string): Promise<void> {

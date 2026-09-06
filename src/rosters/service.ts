@@ -2,8 +2,8 @@ import { PermissionFlagsBits, type Client, type Guild, type GuildMember } from "
 
 import type { RosterRepository } from "../database.js";
 import { buildSquadControlRows } from "../squad-components.js";
-import { isManualEnlistedRank, officerRankForSeconds, rankDisplayName, rankForSeconds } from "../ranks.js";
-import { buildRosterEmbeds, escapeRosterText, type RosterSection } from "./format.js";
+import { isManualEnlistedRank, officerRankForSeconds, rankForSeconds } from "../ranks.js";
+import { memberLine, buildRosterEmbeds, escapeRosterText, type RosterSection } from "./format.js";
 import { MemberDirectory } from "./member-directory.js";
 import { MissingRosterChannelError, RosterPublisher } from "./publisher.js";
 
@@ -176,7 +176,7 @@ export class RosterService {
     sections.push(...squads.map((squad) => {
       const squadMembers = (assignments.get(squad.id) ?? []).sort(compareMembers);
       return {
-        name: `${squad.name} — ${squadMembers.length}`,
+        name: `${this.repository.isSquadLocked(guildId, squad.id) ? "🔒" : "🔓"} ${squad.name} — ${squadMembers.length}`,
         lines: squadMembers.map((member) => memberLine(member, this.memberRank(guild, member, config.squadLeaderRoleId), loadoutAssignments.get(member.id))),
       };
     }));
@@ -278,10 +278,4 @@ export class RosterService {
 function compareMembers(left: GuildMember, right: GuildMember): number {
   const byName = memberNameCollator.compare(left.displayName, right.displayName);
   return byName || left.id.localeCompare(right.id);
-}
-
-function memberLine(member: GuildMember, rank?: string, loadoutRole?: string): string {
-  const details = [rank ? rankDisplayName(rank) : null, loadoutRole ? escapeRosterText(loadoutRole) : null]
-    .filter((detail): detail is string => Boolean(detail));
-  return `• <@${member.id}>${details.length ? ` — ${details.map((detail) => `**${detail}**`).join(" · ")}` : ""}`;
 }

@@ -1,3 +1,4 @@
+import { createSummons, SummonsError } from "./operations.js";
 import {
   ChannelType,
   MessageFlags,
@@ -212,30 +213,18 @@ export async function handleSquadComponentInteraction(
         await editReply(interaction, `That squad was called recently. Try again in ${Math.ceil(remaining / 1_000)} seconds.`);
         return true;
       }
-      const memberIds = repository.listMemberships(guildId)
-        .filter((candidate) => candidate.squadId === squad.id)
-        .map((candidate) => candidate.userId);
       lastSquadCalls.set(cooldownKey, Date.now());
-      const batches: string[][] = [];
-      for (let index = 0; index < memberIds.length; index += 50) {
-        batches.push(memberIds.slice(index, index + 50));
-      }
-      const firstBatch = batches[0]!;
-      await callChannel.send({
-        content: `**${escapeRosterText(squad.name)}, form up!** <@${member.id}> is calling the squad.\n${firstBatch.map((id) => `<@${id}>`).join(" ")}`,
-        allowedMentions: { parse: [], users: firstBatch },
-      });
-      for (const batch of batches.slice(1)) {
-        await callChannel.send({
-          content: batch.map((id) => `<@${id}>`).join(" "),
-          allowedMentions: { parse: [], users: batch },
-        });
-      }
+      await createSummons(guild, repository, squad.id, callChannel.id, member.id);
       await editReply(interaction, `Called **${escapeRosterText(squad.name)}** in <#${callChannel.id}>.`);
       return true;
     }
 
     if (isLeave) {
+      const membership = repository.getMembership(guildId, member.id);
+      if (membership && repository.isSquadLocked(guildId, membership.squadId)) {
+        await editReply(interaction, "Your squad is locked for its summons. Ask a squad manager to unlock it or change your assignment.");
+        return true;
+      }
       repository.endVoiceActivity(guildId, member.id);
       const removed = repository.unassignMember(guildId, member.id);
       if (!removed) {
@@ -274,6 +263,11 @@ export async function handleSquadComponentInteraction(
       return true;
     }
 
+    if (repository.isSquadLocked(guildId, squad.id) || (currentMembership && repository.isSquadLocked(guildId, currentMembership.squadId))) {
+      await editReply(interaction, "That move involves a locked squad. Ask a squad manager to unlock it or change your assignment.");
+      return true;
+    }
+
     repository.endVoiceActivity(guildId, member.id);
     repository.assignMember(guildId, member.id, squad.id, member.id);
     scheduler.schedule(guildId, "squad");
@@ -286,7 +280,9 @@ export async function handleSquadComponentInteraction(
     console.error(`[squad] Self-service interaction failed in guild ${guildId}:`, error);
     await editReply(
       interaction,
-      "Your squad assignment could not be changed. Please try again or ask a squad manager for help.",
+      error instanceof SummonsError ? error.message : isCall
+        ? "Could not publish the squad summons. Check the bot’s channel permissions and try again."
+        : "Your squad assignment could not be changed. Please try again or ask a squad manager for help.",
     );
     return true;
   }

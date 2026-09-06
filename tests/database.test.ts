@@ -40,11 +40,15 @@ describe("RosterRepository", () => {
 
   it("stores the voice lobby and temporary channel ownership", () => {
     repository.setTemporaryVoiceLobbyChannel("guild-1", "voice-lobby");
-    repository.upsertTemporaryVoiceChannel("guild-1", "voice-a", "member-a");
+    repository.upsertTemporaryVoiceChannel("guild-1", "voice-a", "member-a", 4);
     expect(repository.getGuildConfig("guild-1").temporaryVoiceLobbyChannelId).toBe("voice-lobby");
     expect(repository.getTemporaryVoiceChannelForOwner("guild-1", "member-a")).toMatchObject({
       channelId: "voice-a",
       ownerUserId: "member-a",
+    });
+    expect(repository.getTemporaryVoiceChannelForSquad("guild-1", 4)).toMatchObject({
+      channelId: "voice-a",
+      squadId: 4,
     });
 
     repository.upsertTemporaryVoiceChannel("guild-1", "voice-b", "member-a");

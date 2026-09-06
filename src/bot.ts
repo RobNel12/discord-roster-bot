@@ -1,3 +1,4 @@
+import { handleOperationInteraction, handleReadyReaction, reconcileOperations } from "./operations.js";
 import { Client, Events, GatewayIntentBits, Partials, type Interaction } from "discord.js";
 
 import type { AppConfig } from "./config.js";
@@ -103,6 +104,7 @@ export class RosterBot {
     });
 
     this.client.on(Events.MessageReactionAdd, (reaction, user) => {
+      this.track(handleReadyReaction(reaction, user, this.repository));
       if (user.bot || (reaction.emoji.name !== "⬅️" && reaction.emoji.name !== "➡️")) return;
       this.track((async () => {
         const completeReaction = reaction.partial ? await reaction.fetch() : reaction;
@@ -209,6 +211,7 @@ export class RosterBot {
 
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
+      if (await handleOperationInteraction(interaction, this.repository, this.scheduler)) return;
       const loadoutConfigHandled = await handleLoadoutConfigInteraction(interaction, this.repository);
       if (loadoutConfigHandled) return;
       const rosterSetupHandled = await handleRosterSetupInteraction(interaction, {
@@ -270,6 +273,13 @@ export class RosterBot {
       await this.service.syncSquadRoster(guildId, reconcileMembers);
     } else {
       await this.service.syncBoth(guildId, reconcileMembers);
+    }
+    if (target !== "role") {
+      const guild = this.client.guilds.cache.get(guildId);
+      if (guild) {
+        await this.temporaryVoice.syncGuildPermissions(guild);
+        await reconcileOperations(guild, this.repository);
+      }
     }
   }
 }

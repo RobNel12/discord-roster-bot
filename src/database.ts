@@ -74,11 +74,48 @@ export class RosterRepository {
     this.migrate();
   }
 
+  getOperationPosts(guildId: string): import("./operation-types.js").OperationPost[] {
+    return this.database.prepare("SELECT data FROM operation_posts WHERE guild_id = ? ORDER BY id")
+      .all(guildId).map((row) => JSON.parse(String(row.data)) as import("./operation-types.js").OperationPost);
+  }
+
+  isSquadLocked(guildId: string, squadId: number): boolean {
+    return this.getOperationPosts(guildId).some(post =>
+      post.kind === "summons" && post.squadId === squadId && post.phase !== "closed" && post.squadLocked === true,
+    );
+  }
+
+  saveOperationPost(post: import("./operation-types.js").OperationPost): void {
+    this.database.prepare(`INSERT INTO operation_posts (id, guild_id, data) VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data WHERE guild_id = excluded.guild_id`)
+      .run(post.id, post.guildId, JSON.stringify(post));
+  }
+
+  listVoiceAccessGrants(guildId: string, channelId: string): Array<{ userId: string; view: number | null; connect: number | null }> {
+    return this.database.prepare("SELECT user_id AS userId, view, connect FROM voice_access_grants WHERE guild_id = ? AND channel_id = ?")
+      .all(guildId, channelId) as unknown as Array<{ userId: string; view: number | null; connect: number | null }>;
+  }
+
+  saveVoiceAccessGrant(guildId: string, channelId: string, userId: string, view: number | null, connect: number | null): void {
+    this.database.prepare("INSERT OR IGNORE INTO voice_access_grants VALUES (?, ?, ?, ?, ?)").run(guildId, channelId, userId, view, connect);
+  }
+
+  removeVoiceAccessGrant(guildId: string, channelId: string, userId: string): void {
+    this.database.prepare("DELETE FROM voice_access_grants WHERE guild_id = ? AND channel_id = ? AND user_id = ?").run(guildId, channelId, userId);
+  }
+
   close(): void {
     this.database.close();
   }
 
   private migrate(): void {
+    this.database.exec(`CREATE TABLE IF NOT EXISTS voice_access_grants (
+      guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, user_id TEXT NOT NULL,
+      view INTEGER, connect INTEGER, PRIMARY KEY (guild_id, channel_id, user_id)
+    );`);
+    this.database.exec(`CREATE TABLE IF NOT EXISTS operation_posts (
+      id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, data TEXT NOT NULL
+    );`);
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS guild_config (
         guild_id TEXT PRIMARY KEY,
@@ -438,6 +475,15 @@ export class RosterRepository {
     return row ? { guildId: row.guild_id, channelId: row.channel_id, ownerUserId: row.owner_user_id, squadId: row.squad_id } : null;
   }
 
+  getTemporaryVoiceChannelForSquad(guildId: string, squadId: number): TemporaryVoiceChannel | null {
+    const row = this.database.prepare(`
+      SELECT guild_id, channel_id, owner_user_id, squad_id
+      FROM temporary_voice_channels WHERE guild_id = ? AND squad_id = ?
+      ORDER BY channel_id LIMIT 1
+    `).get(guildId, squadId) as unknown as { guild_id: string; channel_id: string; owner_user_id: string; squad_id: number | null } | undefined;
+    return row ? { guildId: row.guild_id, channelId: row.channel_id, ownerUserId: row.owner_user_id, squadId: row.squad_id } : null;
+  }
+
   listTemporaryVoiceChannels(guildId: string): TemporaryVoiceChannel[] {
     const rows = this.database.prepare(`
       SELECT guild_id, channel_id, owner_user_id, squad_id
@@ -447,6 +493,7 @@ export class RosterRepository {
   }
 
   removeTemporaryVoiceChannel(guildId: string, channelId: string): boolean {
+    this.database.prepare("DELETE FROM voice_access_grants WHERE guild_id = ? AND channel_id = ?").run(guildId, channelId);
     const result = this.database.prepare(
       "DELETE FROM temporary_voice_channels WHERE guild_id = ? AND channel_id = ?",
     ).run(guildId, channelId);
