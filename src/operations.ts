@@ -180,10 +180,32 @@ export async function handleOperationInteraction(interaction: Interaction, repos
         if (post.phase !== "signup") throw new Error("Sign-ups have closed; the ready check has started.");
         post.responses[member.id] = action as "going" | "maybe" | "unavailable";
       } else throw new Error("Unknown control.");
+
+      // Delete the summon messages if closing a squad summons
+      if (post.kind === "summons" && action === "close") {
+        const channel = await guild.channels.fetch(post.channelId).catch(() => null);
+        if (channel && channel.isTextBased()) {
+          for (const msgId of post.messageIds) {
+            await channel.messages.delete(msgId).catch(() => null);
+          }
+        }
+        post.messageIds = [];
+      }
+
       repository.saveOperationPost(post);
       if (post.kind === "summons" && ["lock", "unlock", "close"].includes(action ?? "")) scheduler?.schedule(guild.id, "squad");
-      await publishOperation(guild, repository, post);
-      await interaction.editReply(action === "lock" ? "🔒" : action === "unlock" ? "🔓" : action === "close" ? "Closed. Responses are now frozen and any squad lock is released." : action === "start" ? "Ready check started. Participants can react ✅ or ❌." : "Your sign-up was updated.");
+
+      if (!(post.kind === "summons" && action === "close")) {
+        await publishOperation(guild, repository, post);
+      }
+
+      await interaction.editReply(
+        action === "lock" ? "🔒" :
+        action === "unlock" ? "🔓" :
+        action === "close" ? (post.kind === "summons" ? "Squad summons closed and deleted." : "Closed. Responses are now frozen and any squad lock is released.") :
+        action === "start" ? "Ready check started. Participants can react ✅ or ❌." :
+        "Your sign-up was updated."
+      );
     });
   } catch (error) {
     console.error("[operation]", error);
