@@ -122,15 +122,17 @@ export async function createSummons(guild: Guild, repository: RosterRepository, 
     const squad = repository.getSquad(guild.id, squadId);
     if (!squad) throw new Error("This squad no longer exists.");
     const memberIds = repository.listMemberships(guild.id).filter(m => m.squadId === squadId).map(m => m.userId);
-    const post: OperationPost = { id: randomUUID(), guildId: guild.id, channelId, messageIds: [], kind: "summons", title: `${squad.name}, form up!`, description: "", startsAt: null, squadId, memberIds, responses: {}, ready: {}, phase: "ready" };
+    const post: OperationPost = { id: randomUUID(), guildId: guild.id, channelId, messageIds: [], announcementMessageIds: [], kind: "summons", title: `${squad.name}, form up!`, description: "", startsAt: null, squadId, memberIds, responses: {}, ready: {}, phase: "ready" };
     repository.saveOperationPost(post);
     await publishOperation(guild, repository, post);
     const channel = await guild.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !("send" in channel)) return;
     for (let i = 0; i < memberIds.length; i += 50) {
       const batch = memberIds.slice(i, i + 50);
-      await channel.send({ content: `<@${callerId}> is calling the squad: ${batch.map(id => `<@${id}>`).join(" ")}\nhttps://discord.com/channels/${guild.id}/${channelId}/${post.messageIds[0]}`, allowedMentions: { parse: [], users: batch } });
+      const pingMessage = await channel.send({ content: `<@${callerId}> is calling the squad: ${batch.map(id => `<@${id}>`).join(" ")}\nhttps://discord.com/channels/${guild.id}/${channelId}/${post.messageIds[0]}`, allowedMentions: { parse: [], users: batch } });
+      post.announcementMessageIds?.push(pingMessage.id);
     }
+    repository.saveOperationPost(post);
   });
 }
 
