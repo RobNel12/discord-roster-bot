@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import { assignLoadout, buildPercentageSlots } from "../src/loadout-assignment.js";
+import { assignLoadout, buildPercentageSlots, buildLoadoutPlan } from "../src/loadout-assignment.js";
 import { loadoutPreferencesFromRoleNames } from "../src/squad-interactions.js";
 
 describe("loadout assignment", () => {
+  it("does not bypass a configured Rifleman maximum through fallback assignments", () => {
+    const candidates = ["a", "b"].map(id => ({ id, firstChoices: new Set<string>(), secondChoices: new Set<string>() }));
+    expect(assignLoadout(["Medic", "Rifleman"], candidates, () => 0.99, 0, 1).map(a => a.roleName)).toEqual(["Rifleman", "Unassigned loadout"]);
+  });
+  it("reserves explicit minimums before percentages and caps specialty counts", () => {
+    const roles = [
+      { name: "Medic", percentage: 10, minimumSlots: 2, maximumSlots: 2 },
+      { name: "Recon", percentage: 90, minimumSlots: 0, maximumSlots: 1 },
+    ];
+    expect(buildLoadoutPlan(roles, 5)).toEqual({ slots: ["Medic", "Medic", "Recon", "Rifleman", "Rifleman"], minimumSlotCount: 2 });
+    expect(buildPercentageSlots(roles, 1)).toEqual(["Medic"]);
+    expect(buildPercentageSlots(roles, 50).filter(r => r === "Medic")).toHaveLength(2);
+    expect(buildPercentageSlots([{ name: "Medic", percentage: 100, minimumSlots: 0, maximumSlots: 0 }], 2)).toEqual(["Rifleman", "Rifleman"]);
+  });
+
+  it("uses a second-choice volunteer for a required slot before optional first choices", () => {
+    const plan = buildLoadoutPlan([{ name: "Medic", percentage: 10, minimumSlots: 1 }, { name: "Recon", percentage: 90, minimumSlots: 0 }], 2);
+    const assignments = assignLoadout(plan.slots, [
+      { id: "flexible", firstChoices: new Set(["recon"]), secondChoices: new Set(["medic"]) },
+      { id: "other", firstChoices: new Set(), secondChoices: new Set() },
+    ], () => 0.99, plan.minimumSlotCount);
+    expect(assignments).toContainEqual({ candidateId: "flexible", roleName: "Medic" });
+    expect(new Set(assignments.map(a => a.candidateId)).size).toBe(assignments.length);
+  });
   it("waits for a full percentage slot before allocating secondary roles", () => {
     const roles = [{ name: "Medic", percentage: 10 }, { name: "Recon", percentage: 10, fillPriority: "secondary" as const }];
     for (const size of [1, 5, 9]) {
@@ -62,7 +86,7 @@ describe("loadout assignment", () => {
     expect(buildPercentageSlots([
       { name: "Medic", percentage: 33 },
       { name: "Rifleman", percentage: 67 },
-    ], 6)).toEqual(["Medic", "Rifleman", "Rifleman", "Rifleman", "Rifleman", "Rifleman"]);
+    ], 6).sort()).toEqual(["Medic", "Rifleman", "Rifleman", "Rifleman", "Rifleman", "Rifleman"]);
   });
 
   it("gives a positive configured percentage one slot instead of rounding it to zero", () => {

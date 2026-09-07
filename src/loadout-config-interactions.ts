@@ -19,6 +19,7 @@ interface Session {
   templatePage?: number;
   selectedTemplate?: number;
   pendingTemplateDelete?: number;
+  pendingLimits?: { token: string; role: string };
   selected: string | null;
   pending: { roleId: string; roleName: string; preference: "first" | "second" | null } | null;
 }
@@ -289,6 +290,34 @@ export async function handleLoadoutConfigInteraction(interaction: Interaction, r
     return true;
   }
 
+  if (interaction.isButton() && action === "limits") {
+    const selected = repository.listSquadLoadoutRoles(session.guildId, session.squadId).find(role => role.normalizedName === session.selected);
+    if (!selected) { await interaction.reply({ content: "Select a configured role first.", flags: MessageFlags.Ephemeral }); return true; }
+    const input = (name: string, value: number | null) => new TextInputBuilder().setCustomId(name).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(4).setValue(value === null ? "" : String(value));
+    session.pendingLimits = { token: randomUUID().slice(0, 8), role: selected.normalizedName };
+    await interaction.showModal(new ModalBuilder().setCustomId(`${PREFIX}save-limits:${id}:${session.pendingLimits.token}`).setTitle("Minimum and maximum slots")
+      .addLabelComponents(
+        new LabelBuilder().setLabel("Minimum (blank = fill-priority default)").setTextInputComponent(input("minimum", selected.minimumSlots)),
+        new LabelBuilder().setLabel("Maximum (blank = unlimited)").setTextInputComponent(input("maximum", selected.maximumSlots)),
+      ));
+    return true;
+  }
+
+  if (interaction.isModalSubmit() && action === "save-limits") {
+    const parse = (key: string) => { const text = interaction.fields.getTextInputValue(key).trim(); return text === "" ? null : /^\d+$/u.test(text) ? Number(text) : NaN; };
+    try {
+      if (!session.pendingLimits || session.pendingLimits.token !== customId.split(":")[3]) throw new Error("This limits form expired. Open it again.");
+      repository.setSquadLoadoutLimits(session.guildId, session.squadId, session.pendingLimits.role, parse("minimum"), parse("maximum"));
+      delete session.pendingLimits;
+    } catch (error) {
+      await interaction.reply({ content: error instanceof Error ? error.message : "Could not save slot limits.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await interaction.deferUpdate();
+    await interaction.editReply(panel(repository, id!, session));
+    return true;
+  }
+
   if (interaction.isButton() && action === "quantity") {
     const selected = repository.listSquadLoadoutRoles(session.guildId, session.squadId).find((role) => role.normalizedName === session.selected);
     if (!selected) { await interaction.reply({ content: "Select a configured role first.", flags: MessageFlags.Ephemeral }); return true; }
@@ -348,7 +377,7 @@ function panel(repository: RosterRepository, id: string, session: Session) {
       role.firstPreferenceRoleId ? `1st: <@&${role.firstPreferenceRoleId}>` : null,
       role.secondPreferenceRoleId ? `2nd: <@&${role.secondPreferenceRoleId}>` : null,
     ].filter(Boolean).join(", ");
-    return `${role.normalizedName === session.selected ? "▶ " : "• "}${base} — ${role.percentage}% · ${role.fillPriority === "secondary" ? "2nd fill" : "1st fill"}${preferences ? ` (${preferences})` : ""}${role.instructions ? ` — ${escapeRosterText(role.instructions)}` : ""}`;
+    return `${role.normalizedName === session.selected ? "▶ " : "• "}${base} — ${role.percentage}% · ${role.fillPriority === "secondary" ? "2nd fill" : "1st fill"} · min ${role.minimumSlots ?? "auto"}, max ${role.maximumSlots ?? "∞"}${preferences ? ` (${preferences})` : ""}${role.instructions ? ` — ${escapeRosterText(role.instructions)}` : ""}`;
   });
   const add = new RoleSelectMenuBuilder().setCustomId(`${PREFIX}add:${id}`).setPlaceholder("Choose a Discord role to configure").setMinValues(1).setMaxValues(1);
   const rows: Array<ActionRowBuilder<any>> = [new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(add)];
@@ -366,8 +395,7 @@ function panel(repository: RosterRepository, id: string, session: Session) {
       ),
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`${PREFIX}inc:${id}`).setLabel("Increase").setStyle(ButtonStyle.Success).setDisabled(disabled),
-    new ButtonBuilder().setCustomId(`${PREFIX}dec:${id}`).setLabel("Decrease").setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`${PREFIX}limits:${id}`).setLabel("Min / Max slots").setStyle(ButtonStyle.Secondary).setDisabled(disabled),
     new ButtonBuilder().setCustomId(`${PREFIX}quantity:${id}`).setLabel("Set percentage").setStyle(ButtonStyle.Secondary).setDisabled(disabled),
     new ButtonBuilder().setCustomId(`${PREFIX}instructions:${id}`).setLabel("Instructions").setStyle(ButtonStyle.Secondary).setDisabled(disabled),
     new ButtonBuilder().setCustomId(`${PREFIX}remove:${id}`).setLabel("Remove role").setStyle(ButtonStyle.Danger).setDisabled(disabled),

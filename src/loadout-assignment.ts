@@ -13,33 +13,36 @@ export interface PercentageRole {
   name: string;
   percentage: number;
   fillPriority?: "primary" | "secondary";
+  minimumSlots?: number | null;
+  maximumSlots?: number | null;
 }
 
 export function buildPercentageSlots(roles: readonly PercentageRole[], memberCount: number): string[] {
-  if (!Number.isSafeInteger(memberCount) || memberCount <= 0) return [];
-  const allocations = roles.map((role, index) => ({
-    ...role,
-    index,
-    count: role.fillPriority === "secondary" ? 0 : Math.floor(memberCount * role.percentage / 100),
-  }));
-  let allocated = allocations.reduce((sum, role) => sum + role.count, 0);
-  for (const role of [...allocations]
-    .filter((candidate) => candidate.fillPriority !== "secondary" && candidate.percentage > 0 && candidate.count === 0)
-    .sort((left, right) => right.percentage - left.percentage || left.index - right.index)) {
-    if (allocated >= memberCount) break;
-    role.count = 1;
-    allocated += 1;
-  }
-  for (const role of allocations.filter(candidate => candidate.fillPriority === "secondary")) {
-    role.count = Math.min(Math.max(0, memberCount - allocated), Math.floor(memberCount * role.percentage / 100));
-    allocated += role.count;
-  }
-  const slots = allocations.flatMap((role) => Array.from({ length: role.count }, () => role.name));
-  if (slots.length > memberCount) return slots.slice(0, memberCount);
-  return [...slots, ...Array.from({ length: memberCount - slots.length }, () => "Rifleman")];
+  return buildLoadoutPlan(roles, memberCount).slots;
 }
 
-export function assignLoadout(roleNames: readonly string[], candidates: readonly LoadoutCandidate[], random: () => number = Math.random): LoadoutAssignment[] {
+export function buildLoadoutPlan(roles: readonly PercentageRole[], memberCount: number): { slots: string[]; minimumSlotCount: number } {
+  if (!Number.isSafeInteger(memberCount) || memberCount <= 0) return { slots: [], minimumSlotCount: 0 };
+  const ordered = roles.map((role, index) => ({ ...role, index, count: 0 })).sort((a, b) =>
+    Number(a.fillPriority === "secondary") - Number(b.fillPriority === "secondary") || b.percentage - a.percentage || a.index - b.index,
+  );
+  const slots: string[] = [];
+  for (const role of ordered) {
+    const minimum = role.minimumSlots ?? (role.fillPriority === "secondary" || role.percentage <= 0 ? 0 : 1);
+    role.count = Math.min(minimum, role.maximumSlots ?? memberCount, memberCount - slots.length);
+    slots.push(...Array.from({ length: role.count }, () => role.name));
+  }
+  const minimumSlotCount = slots.length;
+  for (const role of ordered) {
+    const target = Math.min(Math.floor(memberCount * role.percentage / 100), role.maximumSlots ?? memberCount);
+    const extra = Math.min(Math.max(0, target - role.count), memberCount - slots.length);
+    slots.push(...Array.from({ length: extra }, () => role.name));
+  }
+  slots.push(...Array.from({ length: memberCount - slots.length }, () => "Rifleman"));
+  return { slots, minimumSlotCount };
+}
+
+export function assignLoadout(roleNames: readonly string[], candidates: readonly LoadoutCandidate[], random: () => number = Math.random, minimumSlotCount = 0, riflemanMaximum = Infinity): LoadoutAssignment[] {
   const ordered = [...candidates];
   for (let index = ordered.length - 1; index > 0; index--) {
     const other = Math.floor(random() * (index + 1));
@@ -49,7 +52,12 @@ export function assignLoadout(roleNames: readonly string[], candidates: readonly
   const candidateSlots = new Map<string, number>();
   const roleOverrides = new Map<number, string>();
 
-  matchPreferenceTier(ordered, roleNames, slotOwners, candidateSlots, "firstChoices", new Set());
+  if (minimumSlotCount > 0) {
+    const minimumRoles = roleNames.slice(0, minimumSlotCount);
+    matchPreferenceTier(ordered, minimumRoles, slotOwners, candidateSlots, "firstChoices", new Set());
+    matchPreferenceTier(ordered, minimumRoles, slotOwners, candidateSlots, "secondChoices", new Set(slotOwners.keys()));
+  }
+  matchPreferenceTier(ordered, roleNames, slotOwners, candidateSlots, "firstChoices", new Set(slotOwners.keys()));
   matchPreferenceTier(ordered, roleNames, slotOwners, candidateSlots, "secondChoices", new Set(slotOwners.keys()));
 
   const openSlots = roleNames.map((_, index) => index).filter((slot) => !slotOwners.has(slot));
@@ -62,9 +70,14 @@ export function assignLoadout(roleNames: readonly string[], candidates: readonly
     roleOverrides.set(slot, "Rifleman");
   }
 
+  let riflemen = 0;
   return [...slotOwners.entries()]
     .sort(([left], [right]) => left - right)
-    .map(([slot, candidateId]) => ({ candidateId, roleName: roleOverrides.get(slot) ?? roleNames[slot]! }));
+    .map(([slot, candidateId]) => {
+      let roleName = roleOverrides.get(slot) ?? roleNames[slot]!;
+      if (roleName.toLocaleLowerCase("en-US") === "rifleman" && ++riflemen > riflemanMaximum) roleName = "Unassigned loadout";
+      return { candidateId, roleName };
+    });
 }
 
 function matchPreferenceTier(

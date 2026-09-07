@@ -10,7 +10,7 @@ import {
 
 import type { RosterRepository } from "./database.js";
 import type { RosterScheduler } from "./scheduler.js";
-import { assignLoadout, buildPercentageSlots } from "./loadout-assignment.js";
+import { assignLoadout, buildLoadoutPlan } from "./loadout-assignment.js";
 import {
   isSquadJoinCustomId,
   SQUAD_ASSIGN_LOADOUT_CUSTOM_ID,
@@ -149,8 +149,9 @@ export async function handleSquadComponentInteraction(
           ).map((role) => role.normalizedName)),
         };
       });
-      const slots = buildPercentageSlots(configured, candidates.length);
-      const assignments = assignLoadout(slots, candidates);
+      const { slots, minimumSlotCount } = buildLoadoutPlan(configured, candidates.length);
+      const riflemanMaximum = configured.find(role => role.normalizedName === "rifleman")?.maximumSlots ?? Infinity;
+      const assignments = assignLoadout(slots, candidates, Math.random, minimumSlotCount, riflemanMaximum);
       repository.replaceSquadLoadoutAssignments(guildId, squad.id, assignments.map((assignment) => ({
         userId: assignment.candidateId,
         roleName: assignment.roleName,
@@ -177,8 +178,13 @@ export async function handleSquadComponentInteraction(
         }
       }
       const summary = assignments.map((assignment) => `• <@${assignment.candidateId}> — **${escapeRosterText(assignment.roleName)}**`).join("\n");
+      const shortages = configured.flatMap(role => {
+        const minimum = role.minimumSlots ?? (role.fillPriority === "secondary" ? 0 : 1);
+        const actual = assignments.filter(a => a.roleName.toLocaleLowerCase("en-US") === role.normalizedName).length;
+        return actual < Math.min(minimum, role.maximumSlots ?? minimum) ? [`${escapeRosterText(role.name)} ${actual}/${minimum}`] : [];
+      });
       await interaction.editReply({
-        content: `**${escapeRosterText(squad.name)} assignments (${assignments.length}/${slots.length})**\n${summary || "No eligible members were in voice."}${failedDms.length ? `\n\nCould not DM: ${failedDms.map((failed) => `<@${failed.id}>`).join(" ")}. A fallback was attempted in the squad-call channel.` : ""}`,
+        content: `**${escapeRosterText(squad.name)} assignments (${assignments.length}/${slots.length})**\n${summary || "No eligible members were in voice."}${shortages.length ? `\n\nMinimum shortages: ${shortages.join(", ")}` : ""}${failedDms.length ? `\n\nCould not DM: ${failedDms.map((failed) => `<@${failed.id}>`).join(" ")}. A fallback was attempted in the squad-call channel.` : ""}`,
         allowedMentions: { parse: [] },
       });
       return true;

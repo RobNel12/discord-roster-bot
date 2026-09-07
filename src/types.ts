@@ -54,6 +54,8 @@ export interface SquadLoadoutRole {
   normalizedName: string;
   percentage: number;
   fillPriority: "primary" | "secondary";
+  minimumSlots: number | null;
+  maximumSlots: number | null;
   instructions: string | null;
   discordRoleId: string | null;
   firstPreferenceRoleId: string | null;

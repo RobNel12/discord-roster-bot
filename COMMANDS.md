@@ -78,6 +78,10 @@ Inside **Configure loadout**, **Save template** asks for a unique name (1–30 c
 
 The same menu offers **Rename template** and **Delete template** for the selected template. Rename asks for a new unique name; delete requires a separate confirmation and offers Cancel. Neither changes previously applied squad settings or names. Reload after renaming to update a squad's suffix. Template management requires being an assigned squad manager, checked again on every action.
 
+Select a loadout role and press **Min / Max slots** to edit its limits. Minimum and maximum accept whole numbers from 0–1000; blank minimum uses the primary/secondary default, and blank maximum means unlimited. Minimum must not exceed maximum. A minimum of 1 and maximum of 2 reserves a Medic job but caps Medics at two. Minimum 0 removes the guaranteed slot; maximum 0 disables the role's slots. Templates include these limits.
+
+Minimums are filled before percentage targets, including second-choice volunteers before optional first-choice jobs. If minimums exceed available members, primary roles precede secondary, then higher percentages and configuration order decide which slots fit. Selection among volunteers remains random, and specialist eligibility still requires a first/second preference. The assignment summary reports unmet minimums. Remaining members become Rifleman; if you cap Rifleman too, excess members display **Unassigned loadout** without leaving their squad.
+
 ## Summons controls
 
 The orange summons embed shows the squad's members, ranks, loadouts, readiness, and 🔒/🔓 status. New squad members appear as ❌; existing members keep their responses. Departed members are removed. Updates do not send new pings.

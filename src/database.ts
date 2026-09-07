@@ -340,6 +340,9 @@ export class RosterRepository {
       `);
     }
     const loadoutColumns = this.database.prepare("PRAGMA table_info(squad_loadout_roles)").all() as unknown as Array<{ name: string }>;
+    if (!loadoutColumns.some(column => column.name === "minimum_slots")) {
+      this.database.exec("ALTER TABLE squad_loadout_roles ADD COLUMN minimum_slots INTEGER; ALTER TABLE squad_loadout_roles ADD COLUMN maximum_slots INTEGER;");
+    }
     if (!loadoutColumns.some(column => column.name === "fill_priority")) {
       this.database.exec("ALTER TABLE squad_loadout_roles ADD COLUMN fill_priority TEXT NOT NULL DEFAULT 'primary' CHECK(fill_priority IN ('primary', 'secondary'));");
     }
@@ -1070,6 +1073,7 @@ export class RosterRepository {
       for (const role of roles) {
         this.setSquadLoadoutRole(guildId, squadId, role.name, role.percentage, role.instructions, role.discordRoleId);
         this.setSquadLoadoutFillPriority(guildId, squadId, role.normalizedName, role.fillPriority ?? "primary");
+        this.setSquadLoadoutLimits(guildId, squadId, role.normalizedName, role.minimumSlots ?? null, role.maximumSlots ?? null);
         if (role.firstPreferenceRoleId) this.setSquadLoadoutPreferenceRole(guildId, squadId, role.normalizedName, "first", role.firstPreferenceRoleId);
         if (role.secondPreferenceRoleId) this.setSquadLoadoutPreferenceRole(guildId, squadId, role.normalizedName, "second", role.secondPreferenceRoleId);
       }
@@ -1116,10 +1120,18 @@ export class RosterRepository {
     if (!this.getSquad(guildId, squadId)) return [];
     const rows = this.database.prepare(`
       SELECT squad_id, normalized_name, name, role_count, instructions, discord_role_id,
-             first_preference_role_id, second_preference_role_id, fill_priority
+             first_preference_role_id, second_preference_role_id, fill_priority, minimum_slots, maximum_slots
       FROM squad_loadout_roles WHERE squad_id = ? ORDER BY normalized_name
-    `).all(squadId) as unknown as Array<{ squad_id: number; normalized_name: string; name: string; role_count: number; instructions: string | null; discord_role_id: string | null; first_preference_role_id: string | null; second_preference_role_id: string | null; fill_priority: "primary" | "secondary" }>;
-    return rows.map((row) => ({ squadId: row.squad_id, normalizedName: row.normalized_name, name: row.name, percentage: row.role_count, fillPriority: row.fill_priority, instructions: row.instructions, discordRoleId: row.discord_role_id, firstPreferenceRoleId: row.first_preference_role_id, secondPreferenceRoleId: row.second_preference_role_id }));
+    `).all(squadId) as unknown as Array<{ squad_id: number; normalized_name: string; name: string; role_count: number; instructions: string | null; discord_role_id: string | null; first_preference_role_id: string | null; second_preference_role_id: string | null; fill_priority: "primary" | "secondary"; minimum_slots: number | null; maximum_slots: number | null }>;
+    return rows.map((row) => ({ squadId: row.squad_id, normalizedName: row.normalized_name, name: row.name, percentage: row.role_count, fillPriority: row.fill_priority, minimumSlots: row.minimum_slots, maximumSlots: row.maximum_slots, instructions: row.instructions, discordRoleId: row.discord_role_id, firstPreferenceRoleId: row.first_preference_role_id, secondPreferenceRoleId: row.second_preference_role_id }));
+  }
+
+  setSquadLoadoutLimits(guildId: string, squadId: number, normalizedName: string, minimum: number | null, maximum: number | null): void {
+    if ([minimum, maximum].some(value => value !== null && (!Number.isSafeInteger(value) || value < 0 || value > 1000))) throw new Error("Slot limits must be whole numbers from 0 to 1000, or blank.");
+    if (minimum !== null && maximum !== null && minimum > maximum) throw new Error("Minimum cannot exceed maximum.");
+    if (!this.getSquad(guildId, squadId)) throw new Error("This squad no longer exists.");
+    if (!this.database.prepare("UPDATE squad_loadout_roles SET minimum_slots = ?, maximum_slots = ? WHERE squad_id = ? AND normalized_name = ?")
+      .run(minimum, maximum, squadId, normalizedName).changes) throw new Error("Select an existing loadout role.");
   }
 
   setSquadLoadoutFillPriority(guildId: string, squadId: number, normalizedName: string, priority: "primary" | "secondary"): boolean {

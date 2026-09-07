@@ -17,6 +17,7 @@ function setup() {
   repo.setSquadLoadoutPreferenceRole("g", squad.id, "medic", "first", "first");
   repo.setSquadLoadoutPreferenceRole("g", squad.id, "medic", "second", "second");
   repo.setSquadLoadoutFillPriority("g", squad.id, "medic", "secondary");
+  repo.setSquadLoadoutLimits("g", squad.id, "medic", 1, 2);
   return { repo, squad };
 }
 
@@ -31,6 +32,7 @@ it("saves settings as a snapshot and loads them with a single replaceable suffix
   expect(repo.loadLoadoutTemplate("g", squad.id, infantry.id).name).toBe("Alpha (Infantry)");
   expect(repo.listSquadLoadoutAssignments("g", squad.id)).toEqual([]);
   expect(repo.listSquadLoadoutRoles("g", squad.id)[0]?.fillPriority).toBe("secondary");
+  expect(repo.listSquadLoadoutRoles("g", squad.id)[0]).toMatchObject({ minimumSlots: 1, maximumSlots: 2 });
   expect(repo.listSquadLoadoutRoles("g", squad.id)).toEqual([expect.objectContaining({ name: "Medic", percentage: 25, instructions: "Bring supplies", discordRoleId: "medic", firstPreferenceRoleId: "first", secondPreferenceRoleId: "second" })]);
   expect(repo.loadLoadoutTemplate("g", squad.id, aviation.id).name).toBe("Alpha (Aviation)");
   expect(repo.loadLoadoutTemplate("g", squad.id, aviation.id).name).toBe("Alpha (Aviation)");
@@ -75,6 +77,17 @@ it("renames and deletes saved templates without changing applied squads", () => 
   expect(() => repo.loadLoadoutTemplate("g", squad.id, template.id)).toThrow();
 });
 
+it("validates slot limits without changing existing settings on failure", () => {
+  const { repo, squad } = setup();
+  for (const [minimum, maximum] of [[3, 2], [-1, 2], [1.5, 2], [1, -1], [0, 1001]]) {
+    expect(() => repo.setSquadLoadoutLimits("g", squad.id, "medic", minimum!, maximum!)).toThrow();
+  }
+  expect(() => repo.setSquadLoadoutLimits("other", squad.id, "medic", 0, 1)).toThrow();
+  expect(repo.listSquadLoadoutRoles("g", squad.id)[0]).toMatchObject({ minimumSlots: 1, maximumSlots: 2 });
+  repo.setSquadLoadoutLimits("g", squad.id, "medic", null, null);
+  expect(repo.listSquadLoadoutRoles("g", squad.id)[0]).toMatchObject({ minimumSlots: null, maximumSlots: null });
+});
+
 it("persists saved templates and suffix tracking across restarts", () => {
   const dir = mkdtempSync(join(tmpdir(), "loadout-template-"));
   const path = join(dir, "test.sqlite");
@@ -106,6 +119,16 @@ it("offers save/load controls, applies a selection, and rechecks manager access"
   const buttons = payload.components.flatMap((row: { toJSON(): { components: Array<{ custom_id: string }> } }) => row.toJSON().components);
   const saveId = buttons.find((button: { custom_id: string }) => button.custom_id.includes("template-save"))!.custom_id;
   const id = saveId.split(":")[2];
+  const selectRole = make(`loadoutcfg:select:${id}`, "select");
+  selectRole.values = ["medic"];
+  await handleLoadoutConfigInteraction(selectRole as unknown as Interaction, repo);
+  const limits = make(`loadoutcfg:limits:${id}`);
+  await handleLoadoutConfigInteraction(limits as unknown as Interaction, repo);
+  const limitsId = limits.showModal.mock.calls[0]![0].toJSON().custom_id;
+  const submitLimits = make(limitsId, "modal");
+  submitLimits.fields.getTextInputValue = (key?: string) => key === "minimum" ? "2" : "3";
+  await handleLoadoutConfigInteraction(submitLimits as unknown as Interaction, repo);
+  expect(repo.listSquadLoadoutRoles("g", squad.id)[0]).toMatchObject({ minimumSlots: 2, maximumSlots: 3 });
   const save = make(saveId);
   await handleLoadoutConfigInteraction(save as unknown as Interaction, repo);
   expect(save.showModal).toHaveBeenCalledOnce();
