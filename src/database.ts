@@ -1032,6 +1032,23 @@ export class RosterRepository {
     }
   }
 
+  renameLoadoutTemplate(guildId: string, templateId: number, rawName: string): void {
+    const name = rawName.trim();
+    if (!name || name.length > 30 || /[\r\n]/u.test(name)) throw new Error("Template names must be 1–30 characters on one line.");
+    try {
+      const result = this.database.prepare("UPDATE loadout_templates SET name = ?, normalized_name = ? WHERE guild_id = ? AND id = ?")
+        .run(name, name.toLocaleLowerCase("en-US"), guildId, templateId);
+      if (!result.changes) throw new Error("That template no longer exists.");
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw new Error("A template with that name already exists. Choose a different name.");
+      throw error;
+    }
+  }
+
+  deleteLoadoutTemplate(guildId: string, templateId: number): boolean {
+    return Number(this.database.prepare("DELETE FROM loadout_templates WHERE guild_id = ? AND id = ?").run(guildId, templateId).changes) > 0;
+  }
+
   loadLoadoutTemplate(guildId: string, squadId: number, templateId: number): Squad {
     const squad = this.getSquad(guildId, squadId);
     const template = this.database.prepare("SELECT name, roles_json FROM loadout_templates WHERE guild_id = ? AND id = ?")

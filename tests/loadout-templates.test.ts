@@ -54,6 +54,25 @@ it("isolates templates by server and rolls back conflicting or oversized names",
   expect(repo.listSquadLoadoutRoles("g", squad.id)).toEqual(before);
 });
 
+it("renames and deletes saved templates without changing applied squads", () => {
+  const { repo, squad } = setup();
+  repo.saveLoadoutTemplate("g", squad.id, "Infantry");
+  repo.saveLoadoutTemplate("g", squad.id, "Armor");
+  const template = repo.listLoadoutTemplates("g").find(t => t.name === "Infantry")!;
+  repo.loadLoadoutTemplate("g", squad.id, template.id);
+  expect(() => repo.renameLoadoutTemplate("other", template.id, "Wrong server")).toThrow();
+  expect(() => repo.renameLoadoutTemplate("g", template.id, "armor")).toThrow("already exists");
+  expect(() => repo.renameLoadoutTemplate("g", template.id, " ")).toThrow();
+  repo.renameLoadoutTemplate("g", template.id, "Recon");
+  expect(repo.getSquad("g", squad.id)?.name).toBe("Alpha (Infantry)");
+  expect(repo.loadLoadoutTemplate("g", squad.id, template.id).name).toBe("Alpha (Recon)");
+  expect(repo.deleteLoadoutTemplate("other", template.id)).toBe(false);
+  expect(repo.deleteLoadoutTemplate("g", template.id)).toBe(true);
+  expect(repo.getSquad("g", squad.id)?.name).toBe("Alpha (Recon)");
+  expect(repo.listSquadLoadoutRoles("g", squad.id)).toHaveLength(1);
+  expect(() => repo.loadLoadoutTemplate("g", squad.id, template.id)).toThrow();
+});
+
 it("persists saved templates and suffix tracking across restarts", () => {
   const dir = mkdtempSync(join(tmpdir(), "loadout-template-"));
   const path = join(dir, "test.sqlite");
@@ -98,6 +117,25 @@ it("offers save/load controls, applies a selection, and rechecks manager access"
   await handleLoadoutConfigInteraction(apply as unknown as Interaction, repo, scheduler);
   expect(repo.getSquad("g", squad.id)?.name).toBe("Alpha (Infantry)");
   expect(scheduler.schedule).toHaveBeenCalledWith("g", "squad");
+  const templateId = repo.listLoadoutTemplates("g")[0]!.id;
+  const select = make(`loadoutcfg:template-select:${id}`, "select");
+  select.values = [String(templateId)];
+  await handleLoadoutConfigInteraction(select as unknown as Interaction, repo);
+  const rename = make(`loadoutcfg:template-rename:${id}`);
+  await handleLoadoutConfigInteraction(rename as unknown as Interaction, repo);
+  expect(rename.showModal).toHaveBeenCalledOnce();
+  const submitRename = make(`loadoutcfg:template-rename-submit:${id}:${templateId}`, "modal");
+  submitRename.fields.getTextInputValue = () => "Recon";
+  await handleLoadoutConfigInteraction(submitRename as unknown as Interaction, repo);
+  expect(repo.listLoadoutTemplates("g")[0]?.name).toBe("Recon");
+  await handleLoadoutConfigInteraction(make(`loadoutcfg:template-delete:${id}`) as unknown as Interaction, repo);
+  expect(repo.listLoadoutTemplates("g")).toHaveLength(1);
+  await handleLoadoutConfigInteraction(make(`loadoutcfg:template-delete-cancel:${id}`) as unknown as Interaction, repo);
+  await handleLoadoutConfigInteraction(make(`loadoutcfg:template-delete-confirm:${id}:${templateId}`) as unknown as Interaction, repo);
+  expect(repo.listLoadoutTemplates("g")).toHaveLength(1);
+  await handleLoadoutConfigInteraction(make(`loadoutcfg:template-delete:${id}`) as unknown as Interaction, repo);
+  await handleLoadoutConfigInteraction(make(`loadoutcfg:template-delete-confirm:${id}:${templateId}`) as unknown as Interaction, repo);
+  expect(repo.listLoadoutTemplates("g")).toEqual([]);
   manager = false;
   const denied = make(saveId);
   await handleLoadoutConfigInteraction(denied as unknown as Interaction, repo);

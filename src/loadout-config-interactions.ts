@@ -17,6 +17,8 @@ interface Session {
   squadId: number;
   page: number;
   templatePage?: number;
+  selectedTemplate?: number;
+  pendingTemplateDelete?: number;
   selected: string | null;
   pending: { roleId: string; roleName: string; preference: "first" | "second" | null } | null;
 }
@@ -92,10 +94,69 @@ export async function handleLoadoutConfigInteraction(interaction: Interaction, r
     return true;
   }
 
-  if (interaction.isStringSelectMenu() && action === "template-apply") {
-    const templateId = Number(interaction.values[0]);
+  if (interaction.isStringSelectMenu() && action === "template-select") {
+    session.selectedTemplate = Number(interaction.values[0]);
+    delete session.pendingTemplateDelete;
+    await interaction.update(templatePanel(repository, id!, session));
+    return true;
+  }
+
+  if (interaction.isButton() && ["template-rename", "template-delete"].includes(action ?? "")) {
+    const template = repository.listLoadoutTemplates(session.guildId).find(t => t.id === session.selectedTemplate);
+    if (!template) {
+      await interaction.reply({ content: "Select an existing template first.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === "template-rename") {
+      const name = new TextInputBuilder().setCustomId("name").setStyle(TextInputStyle.Short).setRequired(true).setMinLength(1).setMaxLength(30).setValue(template.name);
+      await interaction.showModal(new ModalBuilder().setCustomId(`${PREFIX}template-rename-submit:${id}:${template.id}`).setTitle("Rename template")
+        .addLabelComponents(new LabelBuilder().setLabel("New template name").setTextInputComponent(name)));
+    } else {
+      session.pendingTemplateDelete = template.id;
+      await interaction.update({
+        content: `Delete **${escapeRosterText(template.name)}**? Saved templates cannot be recovered after deletion. Squads that already loaded it keep their settings and names.`,
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(`${PREFIX}template-delete-confirm:${id}:${template.id}`).setLabel("Delete template").setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId(`${PREFIX}template-delete-cancel:${id}`).setLabel("Cancel").setStyle(ButtonStyle.Secondary),
+        )], allowedMentions: { parse: [] },
+      });
+    }
+    return true;
+  }
+
+  if (interaction.isModalSubmit() && action === "template-rename-submit") {
     try {
-      if (!Number.isSafeInteger(templateId)) throw new Error("Select a saved template.");
+      const target = Number(customId.split(":")[3]);
+      if (!Number.isSafeInteger(target)) throw new Error("Select an existing template first.");
+      repository.renameLoadoutTemplate(session.guildId, target, interaction.fields.getTextInputValue("name"));
+    } catch (error) {
+      await interaction.reply({ content: error instanceof Error ? error.message : "Could not rename template.", flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      return true;
+    }
+    await interaction.deferUpdate();
+    await interaction.editReply(templatePanel(repository, id!, session));
+    return true;
+  }
+
+  if (interaction.isButton() && ["template-delete-confirm", "template-delete-cancel"].includes(action ?? "")) {
+    if (action === "template-delete-confirm") {
+      const target = Number(customId.split(":")[3]);
+      if (target !== session.pendingTemplateDelete) {
+        await interaction.reply({ content: "This deletion confirmation expired. Select the template again.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      repository.deleteLoadoutTemplate(session.guildId, target);
+      delete session.selectedTemplate;
+    }
+    delete session.pendingTemplateDelete;
+    await interaction.update(templatePanel(repository, id!, session));
+    return true;
+  }
+
+  if ((interaction.isButton() || interaction.isStringSelectMenu()) && action === "template-apply") {
+    const templateId = interaction.isStringSelectMenu() ? Number(interaction.values[0]) : session.selectedTemplate;
+    try {
+      if (templateId === undefined || !Number.isSafeInteger(templateId)) throw new Error("Select a saved template.");
       repository.loadLoadoutTemplate(session.guildId, session.squadId, templateId);
     } catch (error) {
       await interaction.reply({ content: error instanceof Error ? error.message : "Could not load the template.", flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
@@ -311,13 +372,19 @@ function templatePanel(repository: RosterRepository, id: string, session: Sessio
   const visible = all.slice(session.templatePage * 25, session.templatePage * 25 + 25);
   const rows: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [];
   if (visible.length) rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    new StringSelectMenuBuilder().setCustomId(`${PREFIX}template-apply:${id}`).setPlaceholder("Load a saved template")
-      .addOptions(visible.map(t => ({ label: t.name, value: String(t.id) }))),
+    new StringSelectMenuBuilder().setCustomId(`${PREFIX}template-select:${id}`).setPlaceholder("Select a saved template")
+      .addOptions(visible.map(t => ({ label: t.name, value: String(t.id), default: t.id === session.selectedTemplate }))),
+  ));
+  const selected = all.find(t => t.id === session.selectedTemplate);
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`${PREFIX}template-apply:${id}`).setLabel("Load template").setStyle(ButtonStyle.Primary).setDisabled(!selected),
+    new ButtonBuilder().setCustomId(`${PREFIX}template-rename:${id}`).setLabel("Rename template").setStyle(ButtonStyle.Secondary).setDisabled(!selected),
+    new ButtonBuilder().setCustomId(`${PREFIX}template-delete:${id}`).setLabel("Delete template").setStyle(ButtonStyle.Danger).setDisabled(!selected),
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`${PREFIX}templates-prev:${id}`).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(pages === 1),
     new ButtonBuilder().setCustomId(`${PREFIX}templates-next:${id}`).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(pages === 1),
     new ButtonBuilder().setCustomId(`${PREFIX}templates-back:${id}`).setLabel("Back to loadout").setStyle(ButtonStyle.Primary),
   ));
-  return { content: `**Load template — page ${session.templatePage + 1}/${pages}**\nSelecting a template replaces this squad's loadout settings and clears its current assignments. Its name becomes Base squad (Template).\n${all.length ? "Choose a template below." : "No templates saved in this server yet."}`, components: rows, allowedMentions: { parse: [] as never[] } };
+  return { content: `**Templates — page ${session.templatePage + 1}/${pages}**\nSelect a template, then load, rename, or delete it. Loading replaces this squad's loadout settings and clears current assignments. Renaming or deleting affects only the saved template.\n${selected ? `Selected: **${escapeRosterText(selected.name)}**` : all.length ? "Choose a template below." : "No templates saved in this server yet."}`, components: rows, allowedMentions: { parse: [] as never[] } };
 }
