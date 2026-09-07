@@ -147,11 +147,6 @@ export async function handleSquadComponentInteraction(
             Boolean(role.secondPreferenceRoleId && candidate.roles.cache.has(role.secondPreferenceRoleId)) ||
             parsedPreferences.second.has(role.normalizedName),
           ).map((role) => role.normalizedName)),
-          roleActivitySeconds: new Map(configured.map((role) => [
-            role.normalizedName,
-            repository.getLoadoutRoleActivitySeconds(guildId, candidate.id, role.name),
-          ])),
-          activitySeconds: repository.getVoiceActivitySeconds(guildId, candidate.id),
         };
       });
       const slots = buildPercentageSlots(configured, candidates.length);

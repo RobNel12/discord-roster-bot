@@ -132,20 +132,21 @@ describe("RosterRepository", () => {
     expect(repository.clearSquadLoadoutAssignments("guild-assignments", bravo.id)).toBe(1);
   });
 
-  it("tracks time spent on each assigned loadout role while squad voice is active", () => {
+  it("keeps rank voice time without starting per-loadout timers", () => {
     const squad = repository.createSquad("guild-role-time", "Alpha", "admin");
     repository.assignMember("guild-role-time", "member-a", squad.id, "admin");
     repository.replaceSquadLoadoutAssignments("guild-role-time", squad.id, [{ userId: "member-a", roleName: "Engineer" }]);
     repository.beginVoiceActivity("guild-role-time", "member-a", squad.id, 1_000);
-    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Engineer", 1_120)).toBe(120);
+    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Engineer", 1_120)).toBe(0);
     repository.endVoiceActivity("guild-role-time", "member-a", 1_300);
-    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Engineer", 2_000)).toBe(300);
+    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Engineer", 2_000)).toBe(0);
+    expect(repository.getVoiceActivitySeconds("guild-role-time", "member-a")).toBe(300);
 
     repository.beginVoiceActivity("guild-role-time", "member-a", squad.id, 2_000);
     repository.replaceSquadLoadoutAssignments("guild-role-time", squad.id, [{ userId: "member-a", roleName: "Medic" }]);
     repository.endVoiceActivity("guild-role-time", "member-a", 2_200);
-    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Engineer", 2_200)).toBeGreaterThanOrEqual(300);
-    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Medic", 2_200)).toBeGreaterThanOrEqual(0);
+    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Engineer", 2_200)).toBe(0);
+    expect(repository.getLoadoutRoleActivitySeconds("guild-role-time", "member-a", "Medic", 2_200)).toBe(0);
   });
 
   it("atomically stores named roster pages and priority roles", () => {

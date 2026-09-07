@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 
 import type { RosterRepository } from "./database.js";
+import type { RosterScheduler } from "./scheduler.js";
 import { escapeRosterText } from "./rosters/format.js";
 import { SQUAD_CONFIG_LOADOUT_CUSTOM_ID } from "./squad-components.js";
 
@@ -15,12 +16,13 @@ interface Session {
   guildId: string;
   squadId: number;
   page: number;
+  templatePage?: number;
   selected: string | null;
   pending: { roleId: string; roleName: string; preference: "first" | "second" | null } | null;
 }
 const sessions = new Map<string, Session>();
 
-export async function handleLoadoutConfigInteraction(interaction: Interaction, repository: RosterRepository): Promise<boolean> {
+export async function handleLoadoutConfigInteraction(interaction: Interaction, repository: RosterRepository, scheduler?: Pick<RosterScheduler, "schedule">): Promise<boolean> {
   const customId = "customId" in interaction ? interaction.customId : "";
   if (customId !== SQUAD_CONFIG_LOADOUT_CUSTOM_ID && !customId.startsWith(PREFIX)) return false;
   if (!interaction.inGuild() || !interaction.guild || !interaction.isRepliable()) return true;
@@ -45,6 +47,65 @@ export async function handleLoadoutConfigInteraction(interaction: Interaction, r
   const session = id ? sessions.get(id) : undefined;
   if (!session || session.ownerId !== interaction.user.id || session.guildId !== interaction.guild.id) {
     await interaction.reply({ content: "This loadout configuration panel expired. Open a new one from the squad roster.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const leaderRoleId = repository.getGuildConfig(session.guildId).squadLeaderRoleId;
+  if (!(member.permissions.has(PermissionFlagsBits.ManageGuild) || Boolean(leaderRoleId && member.roles.cache.has(leaderRoleId))) ||
+      repository.getMembership(session.guildId, member.id)?.squadId !== session.squadId) {
+    sessions.delete(id!);
+    await interaction.reply({ content: "You must still be an assigned manager of this squad. Open a new configuration panel.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (interaction.isButton() && action === "template-save") {
+    const name = new TextInputBuilder().setCustomId("name").setStyle(TextInputStyle.Short).setRequired(true).setMinLength(1).setMaxLength(30);
+    await interaction.showModal(new ModalBuilder().setCustomId(`${PREFIX}template-save-submit:${id}`).setTitle("Save loadout template")
+      .addLabelComponents(new LabelBuilder().setLabel("Template name").setTextInputComponent(name)));
+    return true;
+  }
+
+  if (interaction.isModalSubmit() && action === "template-save-submit") {
+    try {
+      repository.saveLoadoutTemplate(session.guildId, session.squadId, interaction.fields.getTextInputValue("name"));
+    } catch (error) {
+      await interaction.reply({ content: error instanceof Error ? error.message : "Could not save the template.", flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      return true;
+    }
+    await interaction.deferUpdate();
+    await interaction.editReply(panel(repository, id!, session));
+    await interaction.followUp({ content: "Template saved. It is available to squad managers in this server.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (interaction.isButton() && ["template-load", "templates-prev", "templates-next"].includes(action ?? "")) {
+    const count = repository.listLoadoutTemplates(session.guildId).length;
+    const pages = Math.max(1, Math.ceil(count / 25));
+    session.templatePage = action === "template-load" ? 0 : ((session.templatePage ?? 0) + (action === "templates-next" ? 1 : -1) + pages) % pages;
+    await interaction.update(templatePanel(repository, id!, session));
+    return true;
+  }
+
+  if (interaction.isButton() && action === "templates-back") {
+    await interaction.update(panel(repository, id!, session));
+    return true;
+  }
+
+  if (interaction.isStringSelectMenu() && action === "template-apply") {
+    const templateId = Number(interaction.values[0]);
+    try {
+      if (!Number.isSafeInteger(templateId)) throw new Error("Select a saved template.");
+      repository.loadLoadoutTemplate(session.guildId, session.squadId, templateId);
+    } catch (error) {
+      await interaction.reply({ content: error instanceof Error ? error.message : "Could not load the template.", flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      return true;
+    }
+    session.page = 0;
+    session.selected = null;
+    session.pending = null;
+    scheduler?.schedule(session.guildId, "squad");
+    await interaction.update(panel(repository, id!, session));
     return true;
   }
 
@@ -236,7 +297,27 @@ function panel(repository: RosterRepository, id: string, session: Session) {
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`${PREFIX}prev:${id}`).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(pageCount === 1),
     new ButtonBuilder().setCustomId(`${PREFIX}next:${id}`).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(pageCount === 1),
+    new ButtonBuilder().setCustomId(`${PREFIX}template-save:${id}`).setLabel("Save template").setStyle(ButtonStyle.Secondary).setDisabled(all.length === 0),
+    new ButtonBuilder().setCustomId(`${PREFIX}template-load:${id}`).setLabel("Load template").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`${PREFIX}close:${id}`).setLabel("Done").setStyle(ButtonStyle.Primary),
   ));
   return { content: `**${escapeRosterText(squad?.name ?? "Squad")} loadout — ${total}% configured**\nUnallocated and rounded remainder: Rifleman\nPage ${session.page + 1}/${pageCount}\n${lines.join("\n") || "No roles configured. Select Discord roles above to add them."}`, components: rows, allowedMentions: { parse: [] as never[] } };
+}
+
+function templatePanel(repository: RosterRepository, id: string, session: Session) {
+  const all = repository.listLoadoutTemplates(session.guildId);
+  const pages = Math.max(1, Math.ceil(all.length / 25));
+  session.templatePage = Math.min(session.templatePage ?? 0, pages - 1);
+  const visible = all.slice(session.templatePage * 25, session.templatePage * 25 + 25);
+  const rows: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [];
+  if (visible.length) rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`${PREFIX}template-apply:${id}`).setPlaceholder("Load a saved template")
+      .addOptions(visible.map(t => ({ label: t.name, value: String(t.id) }))),
+  ));
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`${PREFIX}templates-prev:${id}`).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(pages === 1),
+    new ButtonBuilder().setCustomId(`${PREFIX}templates-next:${id}`).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(pages === 1),
+    new ButtonBuilder().setCustomId(`${PREFIX}templates-back:${id}`).setLabel("Back to loadout").setStyle(ButtonStyle.Primary),
+  ));
+  return { content: `**Load template — page ${session.templatePage + 1}/${pages}**\nSelecting a template replaces this squad's loadout settings and clears its current assignments. Its name becomes Base squad (Template).\n${all.length ? "Choose a template below." : "No templates saved in this server yet."}`, components: rows, allowedMentions: { parse: [] as never[] } };
 }

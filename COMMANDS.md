@@ -66,11 +66,13 @@ Select autocomplete results for squad and page arguments; the bot uses their IDs
 | Join or move to a squad | Everyone | Replaces your previous assignment. Moving into a locked squad is blocked; moving out to an unlocked squad is allowed. Up to 100 squads appear in the menus. |
 | Leave current squad | Everyone | Moves you to Unassigned, including when your squad is locked. |
 | Call my squad | Squad manager assigned to a squad | Posts the squad summons and pings members once in the configured call channel. One open summons per squad; one-minute cooldown. |
-| Configure loadout | Squad manager assigned to a squad | Opens a private configuration panel for percentages, preference roles, and instructions. |
+| Configure loadout | Squad manager assigned to a squad | Opens a private panel for percentages, preference roles, instructions, and named Save/Load templates. |
 | Assign loadouts | Squad manager in their squad's temporary voice channel | Assigns loadouts to members in voice and displays assignments on the roster. Assignment DMs are currently paused. |
 | Clear assignments | Squad manager assigned to a squad | Clears displayed loadouts for that squad. |
 
-See [loadout configuration](README.md#loadouts-and-rank-progress) for preference matching, percentages, and experience priority. Join the configured voice lobby to create or reuse your squad's temporary channel; there is no separate voice-create command.
+See [loadout configuration](README.md#loadouts-and-rank-progress) for preference matching, percentages, and templates. Volunteers are shuffled each assignment run; first choices precede second choices, and activity time gives no priority. Join the configured voice lobby to create or reuse your squad's temporary channel; there is no separate voice-create command.
+
+Inside **Configure loadout**, **Save template** asks for a unique name (1–30 characters) and saves the squad's current percentages, preference-role mappings, and instructions. **Load template** opens a paginated menu of this server's saved templates. Selecting one replaces the squad's configuration, clears old assignments, and appends its name: `Alpha` becomes `Alpha (Infantry)`. Loading another template replaces the suffix. Saving a template does not rename the source squad. A duplicate or oversized resulting squad name is rejected without changing the configuration. Templates persist across restarts. After loading, use **Assign loadouts** to assign members; assignment DMs remain paused.
 
 ## Summons controls
 

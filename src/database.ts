@@ -72,6 +72,8 @@ export class RosterRepository {
       this.database.exec("PRAGMA journal_mode = WAL;");
     }
     this.migrate();
+    // Per-loadout experience no longer influences assignments or accumulates time.
+    this.database.exec("DELETE FROM active_loadout_role_sessions");
   }
 
   getOperationPosts(guildId: string): import("./operation-types.js").OperationPost[] {
@@ -109,6 +111,17 @@ export class RosterRepository {
   }
 
   private migrate(): void {
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS loadout_templates (
+        id INTEGER PRIMARY KEY, guild_id TEXT NOT NULL, name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL, roles_json TEXT NOT NULL,
+        UNIQUE(guild_id, normalized_name)
+      );
+      CREATE TABLE IF NOT EXISTS squad_template_names (
+        squad_id INTEGER PRIMARY KEY, guild_id TEXT NOT NULL,
+        base_name TEXT NOT NULL, applied_name TEXT NOT NULL
+      );
+    `);
     this.database.exec(`CREATE TABLE IF NOT EXISTS voice_access_grants (
       guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, user_id TEXT NOT NULL,
       view INTEGER, connect INTEGER, PRIMARY KEY (guild_id, channel_id, user_id)
@@ -506,11 +519,6 @@ export class RosterRepository {
       INSERT OR IGNORE INTO active_voice_sessions (guild_id, user_id, squad_id, started_at)
       VALUES (?, ?, ?, ?)
     `).run(guildId, userId, squadId, startedAt);
-    const assignment = this.database.prepare(`
-      SELECT role_name FROM squad_loadout_assignments
-      WHERE guild_id = ? AND user_id = ? AND squad_id = ?
-    `).get(guildId, userId, squadId) as unknown as { role_name: string } | undefined;
-    if (assignment) this.beginLoadoutRoleActivity(guildId, userId, squadId, assignment.role_name, startedAt);
   }
 
   listActiveVoiceSessions(guildId: string): Array<{ userId: string; squadId: number }> {
@@ -1003,6 +1011,59 @@ export class RosterRepository {
     return rows.map(mapSquad);
   }
 
+  listLoadoutTemplates(guildId: string): Array<{ id: number; name: string }> {
+    return this.database.prepare("SELECT id, name FROM loadout_templates WHERE guild_id = ? ORDER BY normalized_name")
+      .all(guildId) as unknown as Array<{ id: number; name: string }>;
+  }
+
+  saveLoadoutTemplate(guildId: string, squadId: number, rawName: string): void {
+    if (!this.getSquad(guildId, squadId)) throw new Error("This squad no longer exists.");
+    const name = rawName.trim();
+    if (!name || name.length > 30 || /[\r\n]/u.test(name)) throw new Error("Template names must be 1–30 characters on one line.");
+    const roles = this.listSquadLoadoutRoles(guildId, squadId);
+    if (!roles.length) throw new Error("Configure a loadout before saving a template.");
+    if (roles.reduce((sum, role) => sum + role.percentage, 0) > 100) throw new Error("Configured percentages cannot exceed 100%.");
+    try {
+      this.database.prepare("INSERT INTO loadout_templates (guild_id, name, normalized_name, roles_json) VALUES (?, ?, ?, ?)")
+        .run(guildId, name, name.toLocaleLowerCase("en-US"), JSON.stringify(roles));
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw new Error("A template with that name already exists. Choose a different name.");
+      throw error;
+    }
+  }
+
+  loadLoadoutTemplate(guildId: string, squadId: number, templateId: number): Squad {
+    const squad = this.getSquad(guildId, squadId);
+    const template = this.database.prepare("SELECT name, roles_json FROM loadout_templates WHERE guild_id = ? AND id = ?")
+      .get(guildId, templateId) as unknown as { name: string; roles_json: string } | undefined;
+    if (!squad || !template) throw new Error("That squad or template no longer exists.");
+    const previous = this.database.prepare("SELECT base_name, applied_name FROM squad_template_names WHERE guild_id = ? AND squad_id = ?")
+      .get(guildId, squadId) as unknown as { base_name: string; applied_name: string } | undefined;
+    const baseName = previous?.applied_name === squad.name ? previous.base_name : squad.name;
+    const name = `${baseName} (${template.name})`;
+    if (name.length > 50) throw new Error("The squad name plus template suffix exceeds 50 characters. Shorten the squad or template name first.");
+    const roles = JSON.parse(template.roles_json) as SquadLoadoutRole[];
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const renamed = this.renameSquad(guildId, squadId, name)!;
+      this.database.prepare("DELETE FROM squad_loadout_roles WHERE squad_id = ?").run(squadId);
+      for (const role of roles) {
+        this.setSquadLoadoutRole(guildId, squadId, role.name, role.percentage, role.instructions, role.discordRoleId);
+        if (role.firstPreferenceRoleId) this.setSquadLoadoutPreferenceRole(guildId, squadId, role.normalizedName, "first", role.firstPreferenceRoleId);
+        if (role.secondPreferenceRoleId) this.setSquadLoadoutPreferenceRole(guildId, squadId, role.normalizedName, "second", role.secondPreferenceRoleId);
+      }
+      this.clearSquadLoadoutAssignments(guildId, squadId);
+      this.database.prepare(`INSERT INTO squad_template_names VALUES (?, ?, ?, ?)
+        ON CONFLICT(squad_id) DO UPDATE SET base_name = excluded.base_name, applied_name = excluded.applied_name`)
+        .run(squadId, guildId, baseName, name);
+      this.database.exec("COMMIT");
+      return renamed;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   setSquadLoadoutRole(
     guildId: string,
     squadId: number,
@@ -1081,13 +1142,6 @@ export class RosterRepository {
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
-    }
-    for (const assignment of assignments) {
-      const active = this.database.prepare(`
-        SELECT started_at FROM active_voice_sessions
-        WHERE guild_id = ? AND user_id = ? AND squad_id = ?
-      `).get(guildId, assignment.userId, squadId) as unknown as { started_at: number } | undefined;
-      if (active) this.beginLoadoutRoleActivity(guildId, assignment.userId, squadId, assignment.roleName);
     }
     return true;
   }

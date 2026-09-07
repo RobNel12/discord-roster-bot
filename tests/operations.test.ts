@@ -17,10 +17,11 @@ function fixture() {
   const post: OperationPost = { id: "post", guildId: "g", channelId: "c", messageIds: ["m"], kind: "summons", title: "Alpha", description: "", startsAt: null, squadId: squad.id, memberIds: ["member"], responses: {}, ready: {}, phase: "ready" };
   repository.saveOperationPost(post);
   const message = { id: "m", edit: vi.fn(async (_payload: unknown) => undefined), react: vi.fn() };
-  const guild = { id: "g", members: { fetch: vi.fn(async (id: string) => ({ id, permissions: { has: () => id === "manager" }, roles: { cache: { has: () => false } } })) }, channels: { fetch: vi.fn(async () => ({ type: ChannelType.GuildText, messages: { fetch: vi.fn(async () => message) } })) } } as unknown as Guild;
+  const deleteMessage = vi.fn(async (_id: string) => undefined);
+  const guild = { id: "g", members: { fetch: vi.fn(async (id: string) => ({ id, permissions: { has: () => id === "manager" }, roles: { cache: { has: () => false } } })) }, channels: { fetch: vi.fn(async () => ({ type: ChannelType.GuildText, isTextBased: () => true, messages: { fetch: vi.fn(async () => message), delete: deleteMessage } })) } } as unknown as Guild;
   const reaction = (emoji: string) => ({ emoji: { name: emoji }, message: { id: "m", channelId: "c", guild }, users: { remove: vi.fn(async () => undefined) } }) as unknown as MessageReaction;
   const click = (userId: string, action: string) => ({ isButton: () => true, isChatInputCommand: () => false, customId: `op:post:${action}`, guild, channelId: "c", message: { id: "m" }, user: { id: userId }, deferReply: vi.fn(), editReply: vi.fn() });
-  return { repository, post, guild, reaction, click, message };
+  return { repository, post, guild, reaction, click, message, deleteMessage };
 }
 
 describe("operations and summons", () => {
@@ -106,7 +107,8 @@ describe("operations and summons", () => {
     await handleOperationInteraction(f.click("manager", "close") as unknown as Interaction, f.repository);
     await handleReadyReaction(f.reaction("✅"), { id: "member" } as User, f.repository);
     expect(f.repository.getOperationPosts("g")[0]).toMatchObject({ phase: "closed", ready: { member: false } });
-    expect(f.message.edit).toHaveBeenLastCalledWith(expect.objectContaining({ components: [] }));
+    expect(f.deleteMessage).toHaveBeenCalledWith("m");
+    expect(f.repository.getOperationPosts("g")[0]?.messageIds).toEqual([]);
   });
 
   it("supports changing sign-ups and a manager-started ready check", async () => {

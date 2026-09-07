@@ -79,6 +79,8 @@ export async function publishOperation(guild: Guild, repository: RosterRepositor
   const channel = await guild.channels.fetch(post.channelId);
   if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) throw new Error("The operation channel is unavailable.");
   if (post.kind === "summons" && post.phase !== "closed") {
+    const squad = post.squadId === null ? null : repository.getSquad(post.guildId, post.squadId);
+    if (squad) post.title = `${squad.name}, form up!`;
     post.memberIds = repository.listMemberships(post.guildId).filter(m => m.squadId === post.squadId).map(m => m.userId);
     const current = new Set(post.memberIds);
     for (const userId of Object.keys(post.ready)) if (!current.has(userId)) delete post.ready[userId];

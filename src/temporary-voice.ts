@@ -121,7 +121,11 @@ export class TemporaryVoiceService {
       if (record.squadId === null) continue;
       try {
         const channel = await guild.channels.fetch(record.channelId);
-        if (channel?.type === ChannelType.GuildVoice) await this.syncChannelPermissions(channel, record.squadId);
+        if (channel?.type === ChannelType.GuildVoice) {
+          const squad = this.repository.getSquad(guild.id, record.squadId);
+          if (squad && channel.name !== squad.name) await channel.setName(squad.name, "Updating squad voice channel name");
+          await this.syncChannelPermissions(channel, record.squadId);
+        }
       } catch (error) { console.error(`[voice] Could not sync squad access for ${record.channelId}:`, error); }
     }
   }

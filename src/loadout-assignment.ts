@@ -2,8 +2,6 @@ export interface LoadoutCandidate {
   id: string;
   firstChoices: ReadonlySet<string>;
   secondChoices: ReadonlySet<string>;
-  roleActivitySeconds?: ReadonlyMap<string, number>;
-  activitySeconds: number;
 }
 
 export interface LoadoutAssignment {
@@ -36,8 +34,12 @@ export function buildPercentageSlots(roles: readonly PercentageRole[], memberCou
   return [...slots, ...Array.from({ length: memberCount - slots.length }, () => "Rifleman")];
 }
 
-export function assignLoadout(roleNames: readonly string[], candidates: readonly LoadoutCandidate[]): LoadoutAssignment[] {
-  const ordered = [...candidates].sort((a, b) => b.activitySeconds - a.activitySeconds || a.id.localeCompare(b.id));
+export function assignLoadout(roleNames: readonly string[], candidates: readonly LoadoutCandidate[], random: () => number = Math.random): LoadoutAssignment[] {
+  const ordered = [...candidates];
+  for (let index = ordered.length - 1; index > 0; index--) {
+    const other = Math.floor(random() * (index + 1));
+    [ordered[index], ordered[other]] = [ordered[other]!, ordered[index]!];
+  }
   const slotOwners = new Map<number, string>();
   const candidateSlots = new Map<string, number>();
   const roleOverrides = new Map<number, string>();
@@ -68,17 +70,10 @@ function matchPreferenceTier(
   tier: "firstChoices" | "secondChoices",
   lockedSlots: ReadonlySet<number>,
 ): void {
-  const tierActivity = (candidate: LoadoutCandidate): number => Math.max(0, ...[...candidate[tier]].map((role) => candidate.roleActivitySeconds?.get(role) ?? 0));
-  const orderedCandidates = [...candidates].sort((left, right) =>
-    tierActivity(right) - tierActivity(left) || right.activitySeconds - left.activitySeconds || left.id.localeCompare(right.id),
-  );
+  const orderedCandidates = candidates;
   const candidateById = new Map(orderedCandidates.map((candidate) => [candidate.id, candidate]));
   const tryMatch = (candidate: LoadoutCandidate, visited: Set<number>): boolean => {
-    const slots = roleNames.map((_, slot) => slot).sort((left, right) => {
-      const leftRole = roleNames[left]!.toLocaleLowerCase("en-US");
-      const rightRole = roleNames[right]!.toLocaleLowerCase("en-US");
-      return (candidate.roleActivitySeconds?.get(rightRole) ?? 0) - (candidate.roleActivitySeconds?.get(leftRole) ?? 0) || left - right;
-    });
+    const slots = roleNames.map((_, slot) => slot);
     for (const slot of slots) {
       if (visited.has(slot) || !candidate[tier].has(roleNames[slot]!.toLocaleLowerCase("en-US"))) continue;
       visited.add(slot);

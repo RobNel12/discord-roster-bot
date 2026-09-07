@@ -212,7 +212,7 @@ export class RosterBot {
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
       if (await handleOperationInteraction(interaction, this.repository, this.scheduler)) return;
-      const loadoutConfigHandled = await handleLoadoutConfigInteraction(interaction, this.repository);
+      const loadoutConfigHandled = await handleLoadoutConfigInteraction(interaction, this.repository, this.scheduler);
       if (loadoutConfigHandled) return;
       const rosterSetupHandled = await handleRosterSetupInteraction(interaction, {
         repository: this.repository,

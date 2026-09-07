@@ -17,7 +17,6 @@ describe("loadout assignment", () => {
       id: "member",
       firstChoices: preferences.first,
       secondChoices: preferences.second,
-      activitySeconds: 0,
     }])).toEqual([{ candidateId: "member", roleName: "Medic" }]);
   });
 
@@ -44,15 +43,15 @@ describe("loadout assignment", () => {
   it("lets a second choice take a minimum percentage slot when the first choice is not configured", () => {
     const slots = buildPercentageSlots([{ name: "Pilot", percentage: 10 }], 6);
     const assignments = assignLoadout(slots, [
-      { id: "member", firstChoices: new Set(), secondChoices: new Set(["pilot"]), activitySeconds: 0 },
+      { id: "member", firstChoices: new Set(), secondChoices: new Set(["pilot"]) },
     ]);
     expect(assignments).toEqual([{ candidateId: "member", roleName: "Pilot" }]);
   });
 
   it("prefers first choices, then second choices, regardless of input order", () => {
     const assignments = assignLoadout(["Medic", "Rifleman"], [
-      { id: "alice", firstChoices: new Set(["medic"]), secondChoices: new Set(), activitySeconds: 0 },
-      { id: "bob", firstChoices: new Set(), secondChoices: new Set(["medic"]), activitySeconds: 99_999 },
+      { id: "alice", firstChoices: new Set(["medic"]), secondChoices: new Set() },
+      { id: "bob", firstChoices: new Set(), secondChoices: new Set(["medic"]) },
     ]);
     expect(assignments).toEqual(expect.arrayContaining([
       { candidateId: "alice", roleName: "Medic" },
@@ -62,34 +61,36 @@ describe("loadout assignment", () => {
 
   it("fills no more slots than there are members", () => {
     expect(assignLoadout(["Medic", "Rifleman"], [
-      { id: "alice", firstChoices: new Set(), secondChoices: new Set(), activitySeconds: 0 },
+      { id: "alice", firstChoices: new Set(), secondChoices: new Set() },
     ])).toHaveLength(1);
   });
 
   it("does not force an unpreferred specialist role onto a member", () => {
     expect(assignLoadout(["Engineer"], [
-      { id: "alice", firstChoices: new Set(), secondChoices: new Set(), activitySeconds: 0 },
+      { id: "alice", firstChoices: new Set(), secondChoices: new Set() },
     ])).toEqual([{ candidateId: "alice", roleName: "Rifleman" }]);
   });
 
   it("fills a specialist requirement from a second-choice volunteer", () => {
     expect(assignLoadout(["Engineer"], [
-      { id: "alice", firstChoices: new Set(), secondChoices: new Set(["engineer"]), activitySeconds: 0 },
+      { id: "alice", firstChoices: new Set(), secondChoices: new Set(["engineer"]) },
     ])).toEqual([{ candidateId: "alice", roleName: "Engineer" }]);
   });
 
-  it("prioritizes the volunteer with more tracked time in that specific role", () => {
-    expect(assignLoadout(["Engineer"], [
-      { id: "active-generalist", firstChoices: new Set(["engineer"]), secondChoices: new Set(), roleActivitySeconds: new Map([["engineer", 60]]), activitySeconds: 10_000 },
-      { id: "experienced-engineer", firstChoices: new Set(["engineer"]), secondChoices: new Set(), roleActivitySeconds: new Map([["engineer", 3_600]]), activitySeconds: 100 },
-    ])).toEqual([{ candidateId: "experienced-engineer", roleName: "Engineer" }]);
+  it("gives either same-tier volunteer a chance using the shuffled order", () => {
+    const candidates: import("../src/loadout-assignment.js").LoadoutCandidate[] = [
+      { id: "active-generalist", firstChoices: new Set(["engineer"]), secondChoices: new Set() },
+      { id: "experienced-engineer", firstChoices: new Set(["engineer"]), secondChoices: new Set() },
+    ];
+    expect(assignLoadout(["Engineer"], candidates, () => 0)).toEqual([{ candidateId: "experienced-engineer", roleName: "Engineer" }]);
+    expect(assignLoadout(["Engineer"], candidates, () => 0.99)).toEqual([{ candidateId: "active-generalist", roleName: "Engineer" }]);
   });
 
   it("uses second choices only as fallbacks after first choices are protected", () => {
     const assignments = assignLoadout(["Medic", "Rifleman", "Rifleman"], [
-      { id: "first-medic", firstChoices: new Set(["medic"]), secondChoices: new Set(), activitySeconds: 1 },
-      { id: "fallback-medic", firstChoices: new Set(), secondChoices: new Set(["medic"]), activitySeconds: 10_000 },
-      { id: "rifleman", firstChoices: new Set(["rifleman"]), secondChoices: new Set(), activitySeconds: 2 },
+      { id: "first-medic", firstChoices: new Set(["medic"]), secondChoices: new Set() },
+      { id: "fallback-medic", firstChoices: new Set(), secondChoices: new Set(["medic"]) },
+      { id: "rifleman", firstChoices: new Set(["rifleman"]), secondChoices: new Set() },
     ]);
     expect(assignments).toEqual(expect.arrayContaining([
       { candidateId: "first-medic", roleName: "Medic" },

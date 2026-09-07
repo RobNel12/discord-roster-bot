@@ -22,7 +22,7 @@ function fixture() {
     }
     cache.set(id, value);
   });
-  const channel = { id: "voice", type: ChannelType.GuildVoice, permissionOverwrites: { cache, edit }, delete: vi.fn(async () => undefined) };
+  const channel = { id: "voice", name: "Alpha", setName: vi.fn(async () => undefined), type: ChannelType.GuildVoice, permissionOverwrites: { cache, edit }, delete: vi.fn(async () => undefined) };
   const guild = { id: "g", channels: { fetch: vi.fn(async () => channel), create: vi.fn(async () => channel) } };
   Object.assign(channel, { guild });
   const service = new TemporaryVoiceService(repository, { schedule: vi.fn() } as unknown as RosterScheduler);
