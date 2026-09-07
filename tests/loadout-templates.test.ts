@@ -16,6 +16,7 @@ function setup() {
   repo.setSquadLoadoutRole("g", squad.id, "Medic", 25, "Bring supplies", "medic");
   repo.setSquadLoadoutPreferenceRole("g", squad.id, "medic", "first", "first");
   repo.setSquadLoadoutPreferenceRole("g", squad.id, "medic", "second", "second");
+  repo.setSquadLoadoutFillPriority("g", squad.id, "medic", "secondary");
   return { repo, squad };
 }
 
@@ -29,6 +30,7 @@ it("saves settings as a snapshot and loads them with a single replaceable suffix
   repo.replaceSquadLoadoutAssignments("g", squad.id, [{ userId: "manager", roleName: "Pilot" }]);
   expect(repo.loadLoadoutTemplate("g", squad.id, infantry.id).name).toBe("Alpha (Infantry)");
   expect(repo.listSquadLoadoutAssignments("g", squad.id)).toEqual([]);
+  expect(repo.listSquadLoadoutRoles("g", squad.id)[0]?.fillPriority).toBe("secondary");
   expect(repo.listSquadLoadoutRoles("g", squad.id)).toEqual([expect.objectContaining({ name: "Medic", percentage: 25, instructions: "Bring supplies", discordRoleId: "medic", firstPreferenceRoleId: "first", secondPreferenceRoleId: "second" })]);
   expect(repo.loadLoadoutTemplate("g", squad.id, aviation.id).name).toBe("Alpha (Aviation)");
   expect(repo.loadLoadoutTemplate("g", squad.id, aviation.id).name).toBe("Alpha (Aviation)");

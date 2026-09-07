@@ -249,6 +249,15 @@ export async function handleLoadoutConfigInteraction(interaction: Interaction, r
     return true;
   }
 
+  if (interaction.isStringSelectMenu() && action === "fill-priority") {
+    const priority = interaction.values[0];
+    if (session.selected && (priority === "primary" || priority === "secondary")) {
+      repository.setSquadLoadoutFillPriority(session.guildId, session.squadId, session.selected, priority);
+    }
+    await interaction.update(panel(repository, id!, session));
+    return true;
+  }
+
   if (interaction.isButton() && ["inc", "dec", "remove"].includes(action ?? "")) {
     const selected = repository.listSquadLoadoutRoles(session.guildId, session.squadId).find((role) => role.normalizedName === session.selected);
     if (selected) {
@@ -339,7 +348,7 @@ function panel(repository: RosterRepository, id: string, session: Session) {
       role.firstPreferenceRoleId ? `1st: <@&${role.firstPreferenceRoleId}>` : null,
       role.secondPreferenceRoleId ? `2nd: <@&${role.secondPreferenceRoleId}>` : null,
     ].filter(Boolean).join(", ");
-    return `${role.normalizedName === session.selected ? "▶ " : "• "}${base} — ${role.percentage}%${preferences ? ` (${preferences})` : ""}${role.instructions ? ` — ${escapeRosterText(role.instructions)}` : ""}`;
+    return `${role.normalizedName === session.selected ? "▶ " : "• "}${base} — ${role.percentage}% · ${role.fillPriority === "secondary" ? "2nd fill" : "1st fill"}${preferences ? ` (${preferences})` : ""}${role.instructions ? ` — ${escapeRosterText(role.instructions)}` : ""}`;
   });
   const add = new RoleSelectMenuBuilder().setCustomId(`${PREFIX}add:${id}`).setPlaceholder("Choose a Discord role to configure").setMinValues(1).setMaxValues(1);
   const rows: Array<ActionRowBuilder<any>> = [new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(add)];
@@ -348,6 +357,14 @@ function panel(repository: RosterRepository, id: string, session: Session) {
     rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
   }
   const disabled = !session.selected;
+  const selectedRole = all.find(role => role.normalizedName === session.selected);
+  rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`${PREFIX}fill-priority:${id}`).setPlaceholder("Fill priority for selected loadout role").setDisabled(!selectedRole)
+      .addOptions(
+        { label: "1st — Primary fill", value: "primary", description: "Gets a minimum slot when space allows", default: selectedRole?.fillPriority === "primary" },
+        { label: "2nd — Secondary fill", value: "secondary", description: "Waits for a full percentage slot: 10% needs 10 members", default: selectedRole?.fillPriority === "secondary" },
+      ),
+  ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`${PREFIX}inc:${id}`).setLabel("Increase").setStyle(ButtonStyle.Success).setDisabled(disabled),
     new ButtonBuilder().setCustomId(`${PREFIX}dec:${id}`).setLabel("Decrease").setStyle(ButtonStyle.Secondary).setDisabled(disabled),

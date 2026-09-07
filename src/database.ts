@@ -340,6 +340,9 @@ export class RosterRepository {
       `);
     }
     const loadoutColumns = this.database.prepare("PRAGMA table_info(squad_loadout_roles)").all() as unknown as Array<{ name: string }>;
+    if (!loadoutColumns.some(column => column.name === "fill_priority")) {
+      this.database.exec("ALTER TABLE squad_loadout_roles ADD COLUMN fill_priority TEXT NOT NULL DEFAULT 'primary' CHECK(fill_priority IN ('primary', 'secondary'));");
+    }
     if (!loadoutColumns.some((column) => column.name === "discord_role_id")) {
       this.database.exec("ALTER TABLE squad_loadout_roles ADD COLUMN discord_role_id TEXT;");
     }
@@ -1066,6 +1069,7 @@ export class RosterRepository {
       this.database.prepare("DELETE FROM squad_loadout_roles WHERE squad_id = ?").run(squadId);
       for (const role of roles) {
         this.setSquadLoadoutRole(guildId, squadId, role.name, role.percentage, role.instructions, role.discordRoleId);
+        this.setSquadLoadoutFillPriority(guildId, squadId, role.normalizedName, role.fillPriority ?? "primary");
         if (role.firstPreferenceRoleId) this.setSquadLoadoutPreferenceRole(guildId, squadId, role.normalizedName, "first", role.firstPreferenceRoleId);
         if (role.secondPreferenceRoleId) this.setSquadLoadoutPreferenceRole(guildId, squadId, role.normalizedName, "second", role.secondPreferenceRoleId);
       }
@@ -1112,10 +1116,16 @@ export class RosterRepository {
     if (!this.getSquad(guildId, squadId)) return [];
     const rows = this.database.prepare(`
       SELECT squad_id, normalized_name, name, role_count, instructions, discord_role_id,
-             first_preference_role_id, second_preference_role_id
+             first_preference_role_id, second_preference_role_id, fill_priority
       FROM squad_loadout_roles WHERE squad_id = ? ORDER BY normalized_name
-    `).all(squadId) as unknown as Array<{ squad_id: number; normalized_name: string; name: string; role_count: number; instructions: string | null; discord_role_id: string | null; first_preference_role_id: string | null; second_preference_role_id: string | null }>;
-    return rows.map((row) => ({ squadId: row.squad_id, normalizedName: row.normalized_name, name: row.name, percentage: row.role_count, instructions: row.instructions, discordRoleId: row.discord_role_id, firstPreferenceRoleId: row.first_preference_role_id, secondPreferenceRoleId: row.second_preference_role_id }));
+    `).all(squadId) as unknown as Array<{ squad_id: number; normalized_name: string; name: string; role_count: number; instructions: string | null; discord_role_id: string | null; first_preference_role_id: string | null; second_preference_role_id: string | null; fill_priority: "primary" | "secondary" }>;
+    return rows.map((row) => ({ squadId: row.squad_id, normalizedName: row.normalized_name, name: row.name, percentage: row.role_count, fillPriority: row.fill_priority, instructions: row.instructions, discordRoleId: row.discord_role_id, firstPreferenceRoleId: row.first_preference_role_id, secondPreferenceRoleId: row.second_preference_role_id }));
+  }
+
+  setSquadLoadoutFillPriority(guildId: string, squadId: number, normalizedName: string, priority: "primary" | "secondary"): boolean {
+    if (!this.getSquad(guildId, squadId)) return false;
+    return Number(this.database.prepare("UPDATE squad_loadout_roles SET fill_priority = ? WHERE squad_id = ? AND normalized_name = ?")
+      .run(priority, squadId, normalizedName).changes) > 0;
   }
 
   setSquadLoadoutPreferenceRole(

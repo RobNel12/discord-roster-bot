@@ -4,6 +4,37 @@ import { assignLoadout, buildPercentageSlots } from "../src/loadout-assignment.j
 import { loadoutPreferencesFromRoleNames } from "../src/squad-interactions.js";
 
 describe("loadout assignment", () => {
+  it("waits for a full percentage slot before allocating secondary roles", () => {
+    const roles = [{ name: "Medic", percentage: 10 }, { name: "Recon", percentage: 10, fillPriority: "secondary" as const }];
+    for (const size of [1, 5, 9]) {
+      const slots = buildPercentageSlots(roles, size);
+      expect(slots).toHaveLength(size);
+      expect(slots).toContain("Medic");
+      expect(slots).not.toContain("Recon");
+    }
+    expect(buildPercentageSlots(roles, 10).filter(role => role === "Recon")).toHaveLength(1);
+    expect(buildPercentageSlots(roles, 20).filter(role => role === "Recon")).toHaveLength(2);
+  });
+
+  it("reserves primary minimum slots ahead of secondary allocations", () => {
+    const roles = [
+      { name: "Recon", percentage: 50, fillPriority: "secondary" as const },
+      { name: "Medic", percentage: 10 }, { name: "Engineer", percentage: 10 },
+    ];
+    expect(buildPercentageSlots(roles, 2)).toEqual(["Medic", "Engineer"]);
+  });
+  it("keeps reassigned volunteers out of the leftover pool", () => {
+    const assignments = assignLoadout(["Medic", "Engineer", "Rifleman"], [
+      { id: "flexible", firstChoices: new Set(["medic", "engineer"]), secondChoices: new Set() },
+      { id: "medic", firstChoices: new Set(["medic"]), secondChoices: new Set() },
+      { id: "other", firstChoices: new Set(), secondChoices: new Set() },
+    ], () => 0.99);
+    expect(assignments).toEqual([
+      { candidateId: "medic", roleName: "Medic" },
+      { candidateId: "flexible", roleName: "Engineer" },
+      { candidateId: "other", roleName: "Rifleman" },
+    ]);
+  });
   it("parses Discord preference roles despite case or extra spacing", () => {
     const preferences = loadoutPreferencesFromRoleNames(["1st   Medic ", "2ND Pilot", "Unrelated"]);
     expect([...preferences.first]).toEqual(["medic"]);

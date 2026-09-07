@@ -12,6 +12,7 @@ export interface LoadoutAssignment {
 export interface PercentageRole {
   name: string;
   percentage: number;
+  fillPriority?: "primary" | "secondary";
 }
 
 export function buildPercentageSlots(roles: readonly PercentageRole[], memberCount: number): string[] {
@@ -19,15 +20,19 @@ export function buildPercentageSlots(roles: readonly PercentageRole[], memberCou
   const allocations = roles.map((role, index) => ({
     ...role,
     index,
-    count: Math.floor(memberCount * role.percentage / 100),
+    count: role.fillPriority === "secondary" ? 0 : Math.floor(memberCount * role.percentage / 100),
   }));
   let allocated = allocations.reduce((sum, role) => sum + role.count, 0);
   for (const role of [...allocations]
-    .filter((candidate) => candidate.percentage > 0 && candidate.count === 0)
+    .filter((candidate) => candidate.fillPriority !== "secondary" && candidate.percentage > 0 && candidate.count === 0)
     .sort((left, right) => right.percentage - left.percentage || left.index - right.index)) {
     if (allocated >= memberCount) break;
     role.count = 1;
     allocated += 1;
+  }
+  for (const role of allocations.filter(candidate => candidate.fillPriority === "secondary")) {
+    role.count = Math.min(Math.max(0, memberCount - allocated), Math.floor(memberCount * role.percentage / 100));
+    allocated += role.count;
   }
   const slots = allocations.flatMap((role) => Array.from({ length: role.count }, () => role.name));
   if (slots.length > memberCount) return slots.slice(0, memberCount);
@@ -79,7 +84,8 @@ function matchPreferenceTier(
       visited.add(slot);
       const ownerId = slotOwners.get(slot);
       if (!ownerId || (!lockedSlots.has(slot) && candidateById.get(ownerId) && tryMatch(candidateById.get(ownerId)!, visited))) {
-        if (ownerId) candidateSlots.delete(ownerId);
+        // A displaced owner has already been moved to another slot by tryMatch.
+        // Keep that assignment recorded so they cannot receive a second loadout.
         slotOwners.set(slot, candidate.id);
         candidateSlots.set(candidate.id, slot);
         return true;
