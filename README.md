@@ -162,7 +162,7 @@ To configure a squad type:
 3. Select `1st Medic`, enter the desired Medic percentage, and optionally provide loadout instructions. This defines the underlying `Medic` assignment; a plain Medic Discord role is unnecessary.
 4. Select `2nd Medic` to attach it as a fallback. It does not receive a separate percentage.
 5. Repeat for other specialist roles, then press **Done**. Any percentage not allocated to specialists becomes Rifleman.
-6. Have eligible members join that squad's temporary voice channel, then press **Assign loadouts**. The bot refreshes their current Discord roles, fills first choices, fills second choices, and converts specialist vacancies without volunteers to Rifleman.
+6. Have eligible members join that squad's temporary voice channel, then press **Assign loadouts**. The bot refreshes their current Discord roles, fills first choices, fills second choices, and converts specialist vacancies without volunteers to Rifleman. Assignments are shown in the roster and manager response; assignment DMs are currently paused while that workflow is being refined.
 
 Assigned loadout roles remain visible in the squad roster until a manager clears them or reruns assignment. A member's assignment is also removed automatically when they leave, move squads, are removed from the server, or their squad is deleted.
 

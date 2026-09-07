@@ -67,7 +67,7 @@ Select autocomplete results for squad and page arguments; the bot uses their IDs
 | Leave current squad | Everyone | Moves you to Unassigned, including when your squad is locked. |
 | Call my squad | Squad manager assigned to a squad | Posts the squad summons and pings members once in the configured call channel. One open summons per squad; one-minute cooldown. |
 | Configure loadout | Squad manager assigned to a squad | Opens a private configuration panel for percentages, preference roles, and instructions. |
-| Assign loadouts | Squad manager in their squad's temporary voice channel | Assigns loadouts to members in voice, sends DMs, and displays assignments on the roster. |
+| Assign loadouts | Squad manager in their squad's temporary voice channel | Assigns loadouts to members in voice and displays assignments on the roster. Assignment DMs are currently paused. |
 | Clear assignments | Squad manager assigned to a squad | Clears displayed loadouts for that squad. |
 
 See [loadout configuration](README.md#loadouts-and-rank-progress) for preference matching, percentages, and experience priority. Join the configured voice lobby to create or reuse your squad's temporary channel; there is no separate voice-create command.

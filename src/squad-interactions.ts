@@ -22,6 +22,10 @@ import { escapeRosterText } from "./rosters/format.js";
 
 type SquadComponentInteraction = ButtonInteraction | StringSelectMenuInteraction;
 const CALL_COOLDOWN_MS = 60_000;
+// Assignment DMs are intentionally paused while the assignment workflow is refined.
+// Keep the implementation below available so it can be re-enabled without redesigning
+// the assignment flow.
+const SEND_LOADOUT_ASSIGNMENT_DMS = false;
 const lastSquadCalls = new Map<string, number>();
 
 export interface SquadInteractionContext {
@@ -158,21 +162,23 @@ export async function handleSquadComponentInteraction(
       })));
       scheduler.schedule(guildId, "squad");
       const failedDms: Array<{ id: string; roleName: string; instructions: string | null }> = [];
-      for (const assignment of assignments) {
-        const assignee = voiceChannel.members.get(assignment.candidateId);
-        const role = configured.find((candidate) => candidate.normalizedName === assignment.roleName.toLocaleLowerCase("en-US"));
-        if (!assignee) continue;
-        const content = `**${escapeRosterText(squad.name)} loadout assignment**\nYou have been assigned **${escapeRosterText(assignment.roleName)}**.${role?.instructions ? `\n${escapeRosterText(role.instructions)}` : ""}`;
-        try { await assignee.send({ content, allowedMentions: { parse: [] } }); }
-        catch { failedDms.push({ id: assignee.id, roleName: assignment.roleName, instructions: role?.instructions ?? null }); }
-      }
-      if (failedDms.length && config.squadCallChannelId) {
-        const fallbackChannel = await guild.channels.fetch(config.squadCallChannelId).catch(() => null);
-        if (fallbackChannel && (fallbackChannel.type === ChannelType.GuildText || fallbackChannel.type === ChannelType.GuildAnnouncement)) {
-          await fallbackChannel.send({
-            content: `**${escapeRosterText(squad.name)} loadout assignments**\n${failedDms.map((failed) => `<@${failed.id}> — **${escapeRosterText(failed.roleName)}**${failed.instructions ? `: ${escapeRosterText(failed.instructions)}` : ""}`).join("\n")}`,
-            allowedMentions: { parse: [], users: failedDms.map((failed) => failed.id) },
-          });
+      if (SEND_LOADOUT_ASSIGNMENT_DMS) {
+        for (const assignment of assignments) {
+          const assignee = voiceChannel.members.get(assignment.candidateId);
+          const role = configured.find((candidate) => candidate.normalizedName === assignment.roleName.toLocaleLowerCase("en-US"));
+          if (!assignee) continue;
+          const content = `**${escapeRosterText(squad.name)} loadout assignment**\nYou have been assigned **${escapeRosterText(assignment.roleName)}**.${role?.instructions ? `\n${escapeRosterText(role.instructions)}` : ""}`;
+          try { await assignee.send({ content, allowedMentions: { parse: [] } }); }
+          catch { failedDms.push({ id: assignee.id, roleName: assignment.roleName, instructions: role?.instructions ?? null }); }
+        }
+        if (failedDms.length && config.squadCallChannelId) {
+          const fallbackChannel = await guild.channels.fetch(config.squadCallChannelId).catch(() => null);
+          if (fallbackChannel && (fallbackChannel.type === ChannelType.GuildText || fallbackChannel.type === ChannelType.GuildAnnouncement)) {
+            await fallbackChannel.send({
+              content: `**${escapeRosterText(squad.name)} loadout assignments**\n${failedDms.map((failed) => `<@${failed.id}> — **${escapeRosterText(failed.roleName)}**${failed.instructions ? `: ${escapeRosterText(failed.instructions)}` : ""}`).join("\n")}`,
+              allowedMentions: { parse: [], users: failedDms.map((failed) => failed.id) },
+            });
+          }
         }
       }
       const summary = assignments.map((assignment) => `• <@${assignment.candidateId}> — **${escapeRosterText(assignment.roleName)}**`).join("\n");
