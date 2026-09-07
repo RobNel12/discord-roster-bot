@@ -110,7 +110,8 @@ it("offers save/load controls, applies a selection, and rechecks manager access"
   const guild = { id: "g", members: { fetch: vi.fn(async () => ({ id: "manager", permissions: { has: () => manager }, roles: { cache: { has: () => false } } })) } };
   const make = (customId: string, kind = "button") => ({
     customId, guild, user: { id: "manager" }, values: [] as string[],
-    inGuild: () => true, isRepliable: () => true, isButton: () => kind === "button", isModalSubmit: () => kind === "modal", isRoleSelectMenu: () => false, isStringSelectMenu: () => kind === "select",
+    inGuild: () => true, isRepliable: () => true, isButton: () => kind === "button", isModalSubmit: () => kind === "modal", isRoleSelectMenu: () => kind === "role", isStringSelectMenu: () => kind === "select",
+    roles: new Map<string, { id: string; name: string }>(),
     fields: { getTextInputValue: () => "Infantry" }, reply: vi.fn(), update: vi.fn(), showModal: vi.fn(), deferUpdate: vi.fn(), editReply: vi.fn(), followUp: vi.fn(),
   });
   const open = make(SQUAD_CONFIG_LOADOUT_CUSTOM_ID);
@@ -119,6 +120,22 @@ it("offers save/load controls, applies a selection, and rechecks manager access"
   const buttons = payload.components.flatMap((row: { toJSON(): { components: Array<{ custom_id: string }> } }) => row.toJSON().components);
   const saveId = buttons.find((button: { custom_id: string }) => button.custom_id.includes("template-save"))!.custom_id;
   const id = saveId.split(":")[2];
+  for (const [name, expected] of [["1st Medic", "primary"], ["2nd Medic", "secondary"]]) {
+    const pick = make(`loadoutcfg:add:${id}`, "role");
+    pick.values = ["preference"];
+    pick.roles.set("preference", { id: "preference", name: name! });
+    await handleLoadoutConfigInteraction(pick as unknown as Interaction, repo);
+    expect(repo.listSquadLoadoutRoles("g", squad.id)[0]).toMatchObject({ fillPriority: expected, percentage: 25, minimumSlots: 1, maximumSlots: 2 });
+  }
+  const secondOnly = make(`loadoutcfg:add:${id}`, "role");
+  secondOnly.values = ["recon"];
+  secondOnly.roles.set("recon", { id: "recon", name: "2nd Recon" });
+  await handleLoadoutConfigInteraction(secondOnly as unknown as Interaction, repo);
+  expect(secondOnly.showModal).toHaveBeenCalledOnce();
+  const saveNew = make(`loadoutcfg:save-new:${id}`, "modal");
+  saveNew.fields.getTextInputValue = (key?: string) => key === "percentage" ? "10" : "";
+  await handleLoadoutConfigInteraction(saveNew as unknown as Interaction, repo);
+  expect(repo.listSquadLoadoutRoles("g", squad.id).find(role => role.name === "Recon")).toMatchObject({ fillPriority: "secondary", secondPreferenceRoleId: "recon", percentage: 10 });
   const selectRole = make(`loadoutcfg:select:${id}`, "select");
   selectRole.values = ["medic"];
   await handleLoadoutConfigInteraction(selectRole as unknown as Interaction, repo);

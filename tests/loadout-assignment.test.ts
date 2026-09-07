@@ -4,6 +4,40 @@ import { assignLoadout, buildPercentageSlots, buildLoadoutPlan } from "../src/lo
 import { loadoutPreferencesFromRoleNames } from "../src/squad-interactions.js";
 
 describe("loadout assignment", () => {
+  it("fills first-group percentage targets before second-group minima", () => {
+    const plan = buildLoadoutPlan([
+      { name: "Medic", percentage: 100, fillPriority: "primary", minimumSlots: 0 },
+      { name: "Recon", percentage: 0, fillPriority: "secondary", minimumSlots: 1 },
+    ], 2);
+    expect(plan.slots).toEqual(["Medic", "Medic"]);
+  });
+
+  it("fills first-group jobs before a member's preferred second-group job", () => {
+    const plan = buildLoadoutPlan([
+      { name: "Medic", percentage: 50, fillPriority: "primary", minimumSlots: 0 },
+      { name: "Recon", percentage: 50, fillPriority: "secondary", minimumSlots: 1 },
+    ], 2);
+    const assignments = assignLoadout(plan.slots, [
+      { id: "flexible", firstChoices: new Set(["recon"]), secondChoices: new Set(["medic"]) },
+      { id: "other", firstChoices: new Set(), secondChoices: new Set() },
+    ], () => 0.99, plan.minimumSlotCount, Infinity, plan.phases);
+    expect(assignments).toContainEqual({ candidateId: "flexible", roleName: "Medic" });
+  });
+
+  it("randomizes second-group roles and treats optional member preferences equally", () => {
+    const roles = [
+      { name: "Recon", percentage: 10, fillPriority: "secondary" as const, minimumSlots: 1 },
+      { name: "Pilot", percentage: 10, fillPriority: "secondary" as const, minimumSlots: 1 },
+    ];
+    expect(buildLoadoutPlan(roles, 1, () => 0).slots).toEqual(["Pilot"]);
+    expect(buildLoadoutPlan(roles, 1, () => 0.99).slots).toEqual(["Recon"]);
+    const plan = buildLoadoutPlan(roles.slice(0, 1), 1);
+    const assignments = assignLoadout(plan.slots, [
+      { id: "first", firstChoices: new Set(["recon"]), secondChoices: new Set() },
+      { id: "second", firstChoices: new Set(), secondChoices: new Set(["recon", "pilot"]) },
+    ], () => 0, plan.minimumSlotCount, Infinity, plan.phases);
+    expect(assignments).toEqual([{ candidateId: "second", roleName: "Recon" }]);
+  });
   it("does not bypass a configured Rifleman maximum through fallback assignments", () => {
     const candidates = ["a", "b"].map(id => ({ id, firstChoices: new Set<string>(), secondChoices: new Set<string>() }));
     expect(assignLoadout(["Medic", "Rifleman"], candidates, () => 0.99, 0, 1).map(a => a.roleName)).toEqual(["Rifleman", "Unassigned loadout"]);
@@ -13,7 +47,7 @@ describe("loadout assignment", () => {
       { name: "Medic", percentage: 10, minimumSlots: 2, maximumSlots: 2 },
       { name: "Recon", percentage: 90, minimumSlots: 0, maximumSlots: 1 },
     ];
-    expect(buildLoadoutPlan(roles, 5)).toEqual({ slots: ["Medic", "Medic", "Recon", "Rifleman", "Rifleman"], minimumSlotCount: 2 });
+    expect(buildLoadoutPlan(roles, 5)).toMatchObject({ slots: ["Medic", "Medic", "Recon", "Rifleman", "Rifleman"], minimumSlotCount: 2 });
     expect(buildPercentageSlots(roles, 1)).toEqual(["Medic"]);
     expect(buildPercentageSlots(roles, 50).filter(r => r === "Medic")).toHaveLength(2);
     expect(buildPercentageSlots([{ name: "Medic", percentage: 100, minimumSlots: 0, maximumSlots: 0 }], 2)).toEqual(["Rifleman", "Rifleman"]);

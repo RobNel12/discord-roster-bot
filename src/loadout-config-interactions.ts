@@ -186,18 +186,10 @@ export async function handleLoadoutConfigInteraction(interaction: Interaction, r
     const existing = repository.listSquadLoadoutRoles(session.guildId, session.squadId).find((item) => item.normalizedName === roleName.toLocaleLowerCase("en-US"));
     if (preference && existing) {
       repository.setSquadLoadoutPreferenceRole(session.guildId, session.squadId, existing.normalizedName, preference, role.id);
+      repository.setSquadLoadoutFillPriority(session.guildId, session.squadId, existing.normalizedName, preference === "first" ? "primary" : "secondary");
       session.selected = existing.normalizedName;
       await interaction.update(panel(repository, id!, session));
       return true;
-    }
-    if (preference === "second") {
-      if (!existing) {
-        await interaction.reply({
-          content: `Select **1st ${escapeRosterText(roleName)}** first to create the **${escapeRosterText(roleName)}** loadout and set its percentage. This second-choice role is only a fallback and does not add a percentage.`,
-          flags: MessageFlags.Ephemeral,
-        });
-        return true;
-      }
     }
     session.pending = { roleId: role.id, roleName, preference };
     const percentage = new TextInputBuilder().setCustomId("percentage").setStyle(TextInputStyle.Short).setRequired(true).setMinLength(1).setMaxLength(3).setValue(String(existing?.percentage ?? 10));
@@ -237,6 +229,7 @@ export async function handleLoadoutConfigInteraction(interaction: Interaction, r
     if (session.pending.preference) {
       repository.setSquadLoadoutPreferenceRole(session.guildId, session.squadId, normalizedName, session.pending.preference, session.pending.roleId);
     }
+    repository.setSquadLoadoutFillPriority(session.guildId, session.squadId, normalizedName, session.pending.preference === "second" ? "secondary" : "primary");
     session.selected = normalizedName;
     session.pending = null;
     await interaction.deferUpdate();
@@ -251,11 +244,7 @@ export async function handleLoadoutConfigInteraction(interaction: Interaction, r
   }
 
   if (interaction.isStringSelectMenu() && action === "fill-priority") {
-    const priority = interaction.values[0];
-    if (session.selected && (priority === "primary" || priority === "secondary")) {
-      repository.setSquadLoadoutFillPriority(session.guildId, session.squadId, session.selected, priority);
-    }
-    await interaction.update(panel(repository, id!, session));
+    await interaction.reply({ content: "Choose the 1st or 2nd Discord role above to change this loadout's fill group.", flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -386,14 +375,6 @@ function panel(repository: RosterRepository, id: string, session: Session) {
     rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
   }
   const disabled = !session.selected;
-  const selectedRole = all.find(role => role.normalizedName === session.selected);
-  rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    new StringSelectMenuBuilder().setCustomId(`${PREFIX}fill-priority:${id}`).setPlaceholder("Fill priority for selected loadout role").setDisabled(!selectedRole)
-      .addOptions(
-        { label: "1st — Primary fill", value: "primary", description: "Gets a minimum slot when space allows", default: selectedRole?.fillPriority === "primary" },
-        { label: "2nd — Secondary fill", value: "secondary", description: "Waits for a full percentage slot: 10% needs 10 members", default: selectedRole?.fillPriority === "secondary" },
-      ),
-  ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`${PREFIX}limits:${id}`).setLabel("Min / Max slots").setStyle(ButtonStyle.Secondary).setDisabled(disabled),
     new ButtonBuilder().setCustomId(`${PREFIX}quantity:${id}`).setLabel("Set percentage").setStyle(ButtonStyle.Secondary).setDisabled(disabled),

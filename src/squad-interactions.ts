@@ -149,9 +149,9 @@ export async function handleSquadComponentInteraction(
           ).map((role) => role.normalizedName)),
         };
       });
-      const { slots, minimumSlotCount } = buildLoadoutPlan(configured, candidates.length);
+      const { slots, minimumSlotCount, phases } = buildLoadoutPlan(configured, candidates.length);
       const riflemanMaximum = configured.find(role => role.normalizedName === "rifleman")?.maximumSlots ?? Infinity;
-      const assignments = assignLoadout(slots, candidates, Math.random, minimumSlotCount, riflemanMaximum);
+      const assignments = assignLoadout(slots, candidates, Math.random, minimumSlotCount, riflemanMaximum, phases);
       repository.replaceSquadLoadoutAssignments(guildId, squad.id, assignments.map((assignment) => ({
         userId: assignment.candidateId,
         roleName: assignment.roleName,
