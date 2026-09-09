@@ -35,8 +35,7 @@ Select autocomplete results for squad and page arguments; the bot uses their IDs
 | --- | --- | --- | --- |
 | `/squad set-call-channel` | Server manager | `channel`: Squad call channel | Choose where squad call notifications are sent |
 | `/squad clear-call-channel` | Server manager | None | Disable squad call notifications |
-| `/squad set-rank-channel` | Server manager | `channel`: Rank update channel | Choose where automatic rank promotions are announced |
-| `/squad clear-rank-channel` | Server manager | None | Disable automatic rank promotion announcements |
+| `/squad leaderboard` | Everyone | `page` (optional): Page number, 10 members per page; `track` (optional): all, enlisted, officer | Privately show current server members ranked by rank, then current-track voice time, including active sessions |
 | `/squad rank-progress` | Everyone | `member` (optional): Member to check; defaults to you | Check logged squad voice time and progress toward the next rank |
 | `/squad set-voice-lobby` | Server manager | `channel`: Join-to-create voice channel | Choose the voice channel that creates temporary squad channels |
 | `/squad clear-voice-lobby` | Server manager | None | Disable temporary voice channel creation |
@@ -125,7 +124,6 @@ The start time is informational: a manager starts the ready check manually. An o
 /squad set-call-channel channel:#squad-calls
 /squad set-leader-role role:@Squad Leader
 /squad set-voice-lobby channel:#Join-to-Create
-/squad set-rank-channel channel:#rank-updates
 /squad create name:Alpha
 /squad assign member:@Leader squad:Alpha
 ```
@@ -148,10 +146,14 @@ Deleting a publication preserves its configuration and squad assignments. Use it
 ```text
 /squad rank-progress
 /squad rank-progress member:@Member
+/squad leaderboard
+/squad leaderboard track:enlisted page:2
 /squad set-rank member:@Member rank:SGT
 ```
 
 Select the rank from Discord's offered choices. Only server managers can set it, and it must match the member's enlisted/officer eligibility. Command Sgt. Maj. and Sgt. Maj. of the Army are manual enlisted appointments. See [rank progression](README.md#4-set-up-the-rosters-in-discord) for thresholds. Time counts only in the member's own tracked squad voice channel.
+
+Rank progression sends no automated channel messages or DMs. Rank progress and leaderboard commands reply ephemerally to the person using them. The old `set-rank-channel` and `clear-rank-channel` commands are retired; redeploy commands after updating. The combined leaderboard orders officers above enlisted ranks, breaks rank ties by current-track voice time and then member ID, and excludes bots/departed members. Use the track filter to compare members on the same progression track. Page numbers beyond the end display the last page.
 
 ### Refresh and recover
 

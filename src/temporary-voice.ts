@@ -9,7 +9,7 @@ import {
 
 import type { RosterRepository } from "./database.js";
 import type { RosterScheduler } from "./scheduler.js";
-import { ENLISTED_RANKS, OFFICER_RANKS, rankDisplayName } from "./ranks.js";
+import { ENLISTED_RANKS, OFFICER_RANKS } from "./ranks.js";
 
 export class TemporaryVoiceService {
   private readonly pendingSquads = new Map<string, Promise<void>>();
@@ -76,18 +76,14 @@ export class TemporaryVoiceService {
     const nextIndex = track.findIndex((rank) => rank.requiredSeconds > seconds);
     if (nextIndex < 0) return;
     const next = track[nextIndex]!;
-    const previous = track[Math.max(0, nextIndex - 1)]!;
     const delay = Math.max(1, next.requiredSeconds - seconds) * 1_000;
     const key = `${guild.id}:${userId}`;
     const timer = setTimeout(() => {
       this.rankTimers.delete(key);
-      void (async () => {
-        const stillActive = this.repository.listActiveVoiceSessions(guild.id).some((session) => session.userId === userId);
-        if (!stillActive) return;
-        this.scheduler.schedule(guild.id, "squad");
-        await this.announcePromotion(guild, userId, previous.abbreviation, next.abbreviation);
-        this.scheduleNextRankUpdate(guild, userId);
-      })();
+      const stillActive = this.repository.listActiveVoiceSessions(guild.id).some((session) => session.userId === userId);
+      if (!stillActive) return;
+      this.scheduler.schedule(guild.id, "squad");
+      this.scheduleNextRankUpdate(guild, userId);
     }, delay);
     timer.unref();
     this.rankTimers.set(key, timer);
@@ -98,22 +94,6 @@ export class TemporaryVoiceService {
     const timer = this.rankTimers.get(key);
     if (timer) clearTimeout(timer);
     this.rankTimers.delete(key);
-  }
-
-  private async announcePromotion(guild: Guild, userId: string, previousRank: string, nextRank: string): Promise<void> {
-    const member = await guild.members.fetch(userId).catch(() => null);
-    if (!member) return;
-    const channelId = this.repository.getGuildConfig(guild.id).rankUpdateChannelId;
-    if (!channelId) return;
-    const channel = await guild.channels.fetch(channelId).catch(() => null);
-    if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
-      this.repository.clearRankUpdateChannelIfMatches(guild.id, channelId);
-      return;
-    }
-    await channel.send({
-      content: `Congratulations <@${userId}>! You have been promoted from **${rankDisplayName(previousRank)}** to **${rankDisplayName(nextRank)}**.`,
-      allowedMentions: { parse: [], users: [userId] },
-    }).catch((error: unknown) => console.error(`[rank] Could not announce promotion in guild ${guild.id}:`, error));
   }
 
   async syncGuildPermissions(guild: Guild): Promise<void> {

@@ -136,6 +136,11 @@ const squadCommand = new SlashCommandBuilder()
   .setDescription("Configure and manage the live squad roster")
   .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
   .setContexts(InteractionContextType.Guild)
+  .addSubcommand(sub => sub.setName("leaderboard").setDescription("Show this server's rank leaderboard privately")
+    .addIntegerOption(o => o.setName("page").setDescription("Page number (10 members per page)").setMinValue(1))
+    .addStringOption(o => o.setName("track").setDescription("Which rank track to show").addChoices(
+      { name: "All", value: "all" }, { name: "Enlisted", value: "enlisted" }, { name: "Officers", value: "officer" },
+    )))
   .addSubcommand((subcommand) =>
     subcommand
       .setName("set-call-channel")
@@ -144,15 +149,6 @@ const squadCommand = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand.setName("clear-call-channel").setDescription("Disable squad call notifications"),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("set-rank-channel")
-      .setDescription("Choose where automatic rank promotions are announced")
-      .addChannelOption((option) => option.setName("channel").setDescription("Rank update channel").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true)),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand.setName("clear-rank-channel").setDescription("Disable automatic rank promotion announcements"),
   )
   .addSubcommand((subcommand) =>
     subcommand

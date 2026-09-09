@@ -116,7 +116,6 @@ Create two text channels, then run:
 
 /squad set-channel channel:#squad-roster
 /squad set-call-channel channel:#squad-calls
-/squad set-rank-channel channel:#rank-updates
 /squad set-leader-role role:@Squad Leader
 /squad set-voice-lobby channel:#Join-to-Create
 /squad create name:Alpha
@@ -180,7 +179,9 @@ Use **Load template** to open the template menu, select a saved template, and pr
 
 After selecting a template, **Rename template** opens a name-entry modal and **Delete template** asks for confirmation. Renaming follows the same name-length and uniqueness rules as saving. These actions affect the saved template only: squads that previously loaded it retain their names and settings. Reload a renamed template to apply its new suffix. Deleting cannot be undone; cancel the confirmation to keep it.
 
-The squad roster includes a dedicated **Squad Leaders** section when a squad leader role is configured. It shows each leader's current rank and assigned squad, including leaders who are currently Unassigned. `/squad rank-progress` includes time from an active voice session, not only completed sessions. While a member remains in tracked squad voice, the roster refreshes at the exact next rank threshold and automatic promotions are announced immediately in the configured rank-update channel; leaving and rejoining is unnecessary.
+The squad roster includes a dedicated **Squad Leaders** section when a squad leader role is configured. It shows each leader's current rank and assigned squad, including leaders who are currently Unassigned. `/squad rank-progress` includes time from an active voice session, not only completed sessions. While a member remains in tracked squad voice, the roster refreshes at the next rank threshold; leaving and rejoining is unnecessary. Rank progression is silent: the bot sends no automatic promotion messages or DMs. The former rank-announcement channel commands have been removed, and previously saved channel settings are unused.
+
+Use `/squad leaderboard` for a private rank leaderboard with 10 members per page. Optional `page` and `track` arguments select another page or filter to `enlisted` or `officer`. Members are ordered by rank, then current-track voice time including active sessions, then member ID for ties. In the combined view, officers precede enlisted ranks. Bots and departed members are excluded; current server members without activity appear at their starting rank. Switching tracks resets rank time as usual, so this is not a lifetime-hours leaderboard.
 
 ## Operation sign-ups and squad summons
 
@@ -284,6 +285,6 @@ After deploying code updates, run `npm ci`, `npm run check`, redeploy changed co
 - **Joining the voice lobby does nothing:** the member must first join a squad using the roster menu or be assigned by a squad manager. If their squad channel already exists, the bot moves them there instead of creating another one.
 - **A preferred loadout keeps becoming Rifleman:** confirm the member is in the correct squad voice channel, the squad has a positive percentage for that specialist, and the Discord role is named `1st Role Name` or `2nd Role Name`. Rerunning assignment replaces the prior result.
 - **Rank time is not increasing:** only time in a tracked temporary voice channel belonging to the member's assigned squad counts. Ordinary voice channels and another squad's channel do not count.
-- **Promotion messages do not appear:** run `/squad set-rank-channel` and verify the bot has View Channel and Send Messages there. The bot schedules each announcement for the live promotion threshold while the member remains in tracked squad voice.
+- **Promotion messages do not appear:** promotions are intentionally silent. Check `/squad rank-progress` or `/squad leaderboard`; both replies are private.
 
 Discord references: [Gateway intents](https://docs.discord.com/developers/events/gateway), [application command permissions](https://docs.discord.com/developers/interactions/application-commands), and [message/allowed-mention behavior](https://docs.discord.com/developers/resources/message).

@@ -19,10 +19,9 @@ describe("application command definitions", () => {
     const subcommandNames = squad?.options?.map((option) => option.name);
 
     expect(subcommandNames).toEqual([
+      "leaderboard",
       "set-call-channel",
       "clear-call-channel",
-      "set-rank-channel",
-      "clear-rank-channel",
       "rank-progress",
       "set-voice-lobby",
       "clear-voice-lobby",

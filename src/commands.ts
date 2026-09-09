@@ -12,6 +12,7 @@ import {
 } from "discord.js";
 
 import { DuplicateSquadNameError, type RosterRepository } from "./database.js";
+import { rankLeaderboard } from "./rank-leaderboard.js";
 import { canManageSquads, isServerManager, missingRosterChannelPermissions } from "./permissions.js";
 import { escapeRosterText } from "./rosters/format.js";
 import { RosterChannelError, RosterPublisher } from "./rosters/publisher.js";
@@ -30,8 +31,6 @@ export interface CommandContext {
 const squadAdminSubcommands = new Set([
   "set-call-channel",
   "clear-call-channel",
-  "set-rank-channel",
-  "clear-rank-channel",
   "set-channel",
   "set-leader-role",
   "clear-leader-role",
@@ -470,29 +469,6 @@ async function handleSquadCommand(
       return;
     }
 
-    if (subcommand === "set-rank-channel") {
-      const selected = interaction.options.getChannel("channel", true);
-      const channel = await guild.channels.fetch(selected.id);
-      if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
-        await reply(interaction, "Choose a server text or announcement channel.");
-        return;
-      }
-      const botMember = guild.members.me ?? await guild.members.fetchMe();
-      if (!channel.permissionsFor(botMember)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
-        await reply(interaction, "The bot needs View Channel and Send Messages in that channel.");
-        return;
-      }
-      repository.setRankUpdateChannel(guildId, channel.id);
-      await reply(interaction, `Automatic rank promotions will now be announced in <#${channel.id}>.`);
-      return;
-    }
-
-    if (subcommand === "clear-rank-channel") {
-      repository.setRankUpdateChannel(guildId, null);
-      await reply(interaction, "Automatic rank promotion announcements are now disabled.");
-      return;
-    }
-
     if (subcommand === "set-leader-role") {
       const role = interaction.options.getRole("role", true);
       if (role.id === guild.id || role.managed) {
@@ -587,6 +563,19 @@ async function handleSquadCommand(
       interaction,
       `The squad leader role was cleared. Server managers still have access.${syncNote}`,
     );
+    return;
+  }
+
+  if (subcommand === "leaderboard") {
+    const track = interaction.options.getString("track") ?? "all";
+    const entries = rankLeaderboard(guild, repository, track);
+    const pages = Math.max(1, Math.ceil(entries.length / 10));
+    const page = Math.min(interaction.options.getInteger("page") ?? 1, pages);
+    const offset = (page - 1) * 10;
+    const rows = entries.slice(offset, offset + 10).map((entry, index) =>
+      `${offset + index + 1}. <@${entry.id}> — **${rankDisplayName(entry.rank)}** · ${formatDuration(entry.seconds)}`,
+    );
+    await reply(interaction, `**Rank leaderboard — ${track}**\n${rows.join("\n") || "No members in this rank track."}\n\nPage ${page}/${pages} · Rank first, then voice time in the current track. Live sessions included.`);
     return;
   }
 
