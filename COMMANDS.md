@@ -1,6 +1,6 @@
 # Command reference
 
-See [README.md](README.md) for installation, permissions, deployment, and troubleshooting. All commands run inside a Discord server. Command replies are private; published rosters and summons appear in their selected channels.
+See [ADMIN_GUIDE.md](ADMIN_GUIDE.md) for task-oriented setup, moderation, and recovery procedures. See [README.md](README.md) for installation, permissions, deployment, and troubleshooting. All commands run inside a Discord server. Command replies are private; published rosters and summons appear in their selected channels.
 
 ## Access
 

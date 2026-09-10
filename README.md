@@ -147,7 +147,7 @@ To move or remove a published roster, first enable Discord **Developer Mode**, r
 
 ## Commands and controls
 
-See [COMMANDS.md](COMMANDS.md) for every slash command, its arguments and access requirements, button behavior, and workflow examples.
+See [ADMIN_GUIDE.md](ADMIN_GUIDE.md) for a task-oriented server administration and moderation guide. See [COMMANDS.md](COMMANDS.md) for every slash command, its arguments and access requirements, button behavior, and workflow examples.
 
 ## Loadouts and rank progress
 
