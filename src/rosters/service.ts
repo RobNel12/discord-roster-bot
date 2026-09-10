@@ -229,7 +229,7 @@ export class RosterService {
     const selfServiceText =
       "Self-service: choose a squad below to join or move; use the leave button to become Unassigned.";
     const accessText = config.memberRoleId && config.conscriptRoleId
-      ? `Access: <@&${config.memberRoleId}> · <@&${config.conscriptRoleId}>`
+      ? `<@&${config.memberRoleId}> are enlisted and earn rank · <@&${config.conscriptRoleId}> are conscripts and don't earn rank`
       : null;
     const embeds = buildRosterEmbeds({
       title: "Squad roster",
