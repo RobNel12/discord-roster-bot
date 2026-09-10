@@ -210,7 +210,7 @@ describe("RosterService", () => {
     expect(roleFields[0]?.value).not.toContain("<@outsider>");
     const squadFields = harness.publications.find(publication => publication.type === "squad")?.pages[0]?.toJSON().fields ?? [];
     const squadDescription = harness.publications.find(publication => publication.type === "squad")?.pages[0]?.toJSON().description;
-    expect(squadDescription).toContain(`Access: <@&${memberRoleId}> are ranked · <@&${conscriptRoleId}> are unranked`);
+    expect(squadDescription).toContain(`Access: <@&${memberRoleId}> are ranked · <@&${conscriptRoleId}> are conscripts (unranked)`);
     expect(squadFields.map(field => field.name)).toEqual(["🔓 Alpha — 1", "Unassigned — 2", "Conscripts — 2"]);
     expect(squadFields[0]?.value).toContain("<@conscript> — **Conscript**");
     expect(squadFields[1]?.value).not.toContain("conscript");
