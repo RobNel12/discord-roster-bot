@@ -184,6 +184,7 @@ describe("RosterService", () => {
     const members = new Collection<string, GuildMember>([
       ["full", fakeMember("full", "Full Member", [memberRoleId, trackedRoleId])],
       ["conscript", fakeMember("conscript", "Conscript", [conscriptRoleId, trackedRoleId])],
+      ["conscript-unassigned", fakeMember("conscript-unassigned", "Unassigned Conscript", [conscriptRoleId, trackedRoleId])],
       ["both", fakeMember("both", "Both", [memberRoleId, conscriptRoleId, trackedRoleId])],
       ["outsider", fakeMember("outsider", "Outsider", [trackedRoleId])],
     ]);
@@ -210,9 +211,11 @@ describe("RosterService", () => {
     const squadFields = harness.publications.find(publication => publication.type === "squad")?.pages[0]?.toJSON().fields ?? [];
     const squadDescription = harness.publications.find(publication => publication.type === "squad")?.pages[0]?.toJSON().description;
     expect(squadDescription).toContain(`Access: <@&${memberRoleId}> are ranked · <@&${conscriptRoleId}> are unranked`);
-    expect(squadFields.map(field => field.name)).toEqual(["Conscripts — 1", "🔓 Alpha — 1", "Unassigned — 2"]);
-    expect(squadFields[0]?.value).toContain("<@conscript> — **Conscript** — Alpha");
-    expect(squadFields[1]?.value).toContain("<@conscript> — **Conscript**");
+    expect(squadFields.map(field => field.name)).toEqual(["🔓 Alpha — 1", "Unassigned — 2", "Conscripts — 2"]);
+    expect(squadFields[0]?.value).toContain("<@conscript> — **Conscript**");
+    expect(squadFields[1]?.value).not.toContain("conscript");
+    expect(squadFields[2]?.value).toContain("<@conscript> — **Conscript** — Alpha");
+    expect(squadFields[2]?.value).toContain("<@conscript-unassigned> — **Conscript** — Unassigned");
     expect(JSON.stringify(squadFields)).not.toContain("outsider");
   });
 

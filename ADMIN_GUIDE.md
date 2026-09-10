@@ -53,7 +53,7 @@ Members can join, move between, or leave squads through the current squad roster
 
 ### Conscripts
 
-When access roles are configured, members holding only the Conscript role appear in a dedicated **Conscripts** section and may join squads, use temporary squad voice, receive loadouts, and respond to summons. They display **Conscript** instead of an activity rank and do not accrue rank time or appear on rank leaderboards.
+When access roles are configured, **Unassigned** contains full Members only. Members holding only the Conscript role appear in a separate **Conscripts** section immediately below it with their squad or Unassigned status. They may join squads, use temporary squad voice, receive loadouts, and respond to summons. Assigned conscripts also appear in their squad with **Conscript** instead of an activity rank. They do not accrue rank time or appear on rank leaderboards.
 
 The configured Member role grants full access and takes precedence when someone holds both roles. Users with neither configured role stay off the rosters and cannot be assigned or self-join a squad. Changing access roles preserves existing assignments and rank records. Use `/roster clear-access-roles` to return to full access for all otherwise eligible server members.
 

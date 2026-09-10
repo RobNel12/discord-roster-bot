@@ -176,16 +176,17 @@ export class RosterService {
     }
 
     const sections: RosterSection[] = [];
+    let conscriptSection: RosterSection | null = null;
     if (config.conscriptRoleId) {
       const squadById = new Map(squads.map((squad) => [squad.id, squad]));
       const conscripts = eligibleMembers.filter((member) => rosterAccess(member, config) === "conscript");
-      sections.push({
+      conscriptSection = {
         name: `Conscripts — ${conscripts.length}`,
         lines: conscripts.map((member) => {
           const squad = squadById.get(membershipByUser.get(member.id) ?? -1);
           return `${memberLine(member, "Conscript", loadoutAssignments.get(member.id))}${squad ? ` — ${escapeRosterText(squad.name)}` : " — Unassigned"}`;
         }),
-      });
+      };
     }
     if (config.squadLeaderRoleId) {
       const squadById = new Map(squads.map((squad) => [squad.id, squad]));
@@ -210,11 +211,14 @@ export class RosterService {
         )),
       };
     }));
-    const unassigned = eligibleMembers.filter((member) => !assignedUserIds.has(member.id));
+    const unassigned = eligibleMembers.filter((member) =>
+      rosterAccess(member, config) === "member" && !assignedUserIds.has(member.id),
+    );
     sections.push({
       name: `Unassigned — ${unassigned.length}`,
-      lines: unassigned.map((member) => memberLine(member, rosterAccess(member, config) === "conscript" ? "Conscript" : undefined)),
+      lines: unassigned.map((member) => memberLine(member)),
     });
+    if (conscriptSection) sections.push(conscriptSection);
 
     // Reload after the member fetch so a server manager's newer setting is never
     // cleared from an older render snapshot.
