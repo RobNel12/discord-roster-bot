@@ -10,6 +10,7 @@ import {
 import type { RosterRepository } from "./database.js";
 import type { RosterScheduler } from "./scheduler.js";
 import { ENLISTED_RANKS, OFFICER_RANKS } from "./ranks.js";
+import { rosterAccess } from "./roster-access.js";
 
 export class TemporaryVoiceService {
   private readonly pendingSquads = new Map<string, Promise<void>>();
@@ -37,7 +38,7 @@ export class TemporaryVoiceService {
       const voiceChannel = this.repository.listTemporaryVoiceChannels(guild.id)
         .find((record) => record.channelId === after.channelId);
       const membership = this.repository.getMembership(guild.id, after.member.id);
-      if (voiceChannel?.squadId && membership?.squadId === voiceChannel.squadId && !after.member.user.bot) {
+      if (voiceChannel?.squadId && membership?.squadId === voiceChannel.squadId && !after.member.user.bot && rosterAccess(after.member, config) === "member") {
         const isOfficer =
           after.member.id === guild.ownerId ||
           after.member.permissions.has(PermissionFlagsBits.ManageGuild) ||
@@ -63,7 +64,29 @@ export class TemporaryVoiceService {
   }
 
   refreshRankTimers(guild: Guild): void {
-    for (const session of this.repository.listActiveVoiceSessions(guild.id)) this.scheduleNextRankUpdate(guild, session.userId);
+    const config = this.repository.getGuildConfig(guild.id);
+    const active = new Set(this.repository.listActiveVoiceSessions(guild.id).map(session => session.userId));
+    for (const userId of active) {
+      const member = guild.members.cache.get(userId);
+      if (!member || rosterAccess(member, config) !== "member") {
+        this.cancelRankTimer(guild.id, userId);
+        this.repository.endVoiceActivity(guild.id, userId);
+      } else {
+        this.scheduleNextRankUpdate(guild, userId);
+      }
+    }
+    const temporaryByChannel = new Map(this.repository.listTemporaryVoiceChannels(guild.id).map(record => [record.channelId, record]));
+    for (const member of guild.members.cache.values()) {
+      if (member.user.bot || rosterAccess(member, config) !== "member" || active.has(member.id)) continue;
+      const record = member.voice.channelId ? temporaryByChannel.get(member.voice.channelId) : undefined;
+      const membership = this.repository.getMembership(guild.id, member.id);
+      if (!record?.squadId || membership?.squadId !== record.squadId) continue;
+      const isOfficer = member.id === guild.ownerId || member.permissions.has(PermissionFlagsBits.ManageGuild) ||
+        Boolean(config.squadLeaderRoleId && member.roles.cache.has(config.squadLeaderRoleId));
+      this.repository.ensureMemberRankTrack(guild.id, member.id, isOfficer ? "officer" : "enlisted");
+      this.repository.beginVoiceActivity(guild.id, member.id, record.squadId);
+      this.scheduleNextRankUpdate(guild, member.id);
+    }
   }
 
   private scheduleNextRankUpdate(guild: Guild, userId: string): void {
@@ -133,7 +156,13 @@ export class TemporaryVoiceService {
     const previous = this.accessQueues.get(key) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
       const guildId = channel.guild.id;
-      const members = new Set(this.repository.listMemberships(guildId).filter(m => m.squadId === squadId).map(m => m.userId));
+      const config = this.repository.getGuildConfig(guildId);
+      const members = new Set(this.repository.listMemberships(guildId).filter(m => {
+        if (m.squadId !== squadId) return false;
+        if (!config.memberRoleId && !config.conscriptRoleId) return true;
+        const member = channel.guild.members.cache?.get(m.userId);
+        return Boolean(member && rosterAccess(member, config) !== null);
+      }).map(m => m.userId));
       for (const grant of this.repository.listVoiceAccessGrants(guildId, channel.id)) {
         if (members.has(grant.userId)) continue;
         if (channel.permissionOverwrites.cache.has(grant.userId)) {
@@ -173,9 +202,9 @@ export class TemporaryVoiceService {
       } else if (channel.type === ChannelType.GuildVoice && record.squadId) {
         for (const member of channel.members.values()) {
           const membership = this.repository.getMembership(guild.id, member.id);
-          if (!member.user.bot && membership?.squadId === record.squadId) {
+          const config = this.repository.getGuildConfig(guild.id);
+          if (!member.user.bot && membership?.squadId === record.squadId && rosterAccess(member, config) === "member") {
             activeUsers.add(member.id);
-            const config = this.repository.getGuildConfig(guild.id);
             const isOfficer =
               member.id === guild.ownerId ||
               member.permissions.has(PermissionFlagsBits.ManageGuild) ||
@@ -201,6 +230,7 @@ export class TemporaryVoiceService {
     const config = this.repository.getGuildConfig(state.guild.id);
     const lobby = state.channel;
     if (!lobby || lobby.id !== config.temporaryVoiceLobbyChannelId) return;
+    if (rosterAccess(member, config) === null) return;
     const membership = this.repository.getMembership(state.guild.id, member.id);
     const squad = membership ? this.repository.getSquad(state.guild.id, membership.squadId) : null;
     if (!squad) return;

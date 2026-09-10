@@ -14,6 +14,16 @@ const rosterCommand = new SlashCommandBuilder()
   .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
   .setContexts(InteractionContextType.Guild)
   .addSubcommand((subcommand) =>
+    subcommand
+      .setName("set-access-roles")
+      .setDescription("Choose the full Member and limited Conscript roles")
+      .addRoleOption((option) => option.setName("member-role").setDescription("Full roster member role").setRequired(true))
+      .addRoleOption((option) => option.setName("conscript-role").setDescription("Squad access without rank earnings").setRequired(true)),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand.setName("clear-access-roles").setDescription("Return to full roster access for all server members"),
+  )
+  .addSubcommand((subcommand) =>
     subcommand.setName("setup").setDescription("Set up the role roster with guided menus"),
   )
   .addSubcommand((subcommand) =>

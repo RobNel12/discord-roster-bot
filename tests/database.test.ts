@@ -18,11 +18,14 @@ describe("RosterRepository", () => {
     expect(initial.roleRosterChannelId).toBeNull();
     expect(initial.squadLeaderRoleId).toBeNull();
     expect(initial.squadCallChannelId).toBeNull();
+    expect(initial.memberRoleId).toBeNull();
+    expect(initial.conscriptRoleId).toBeNull();
     expect(initial.temporaryVoiceLobbyChannelId).toBeNull();
 
     repository.setRoleRosterChannel("guild-1", "roles-channel");
     repository.setSquadRosterChannel("guild-1", "squads-channel");
     repository.setSquadLeaderRole("guild-1", "leader-role");
+    repository.setRosterAccessRoles("guild-1", "member-role", "conscript-role");
     expect(repository.addTrackedRole("guild-1", "role-b")).toBe(true);
     expect(repository.addTrackedRole("guild-1", "role-a")).toBe(true);
     expect(repository.addTrackedRole("guild-1", "role-b")).toBe(false);
@@ -31,11 +34,15 @@ describe("RosterRepository", () => {
       roleRosterChannelId: "roles-channel",
       squadRosterChannelId: "squads-channel",
       squadLeaderRoleId: "leader-role",
+      memberRoleId: "member-role",
+      conscriptRoleId: "conscript-role",
     });
     expect(repository.listTrackedRoles("guild-1").map((role) => role.roleId)).toEqual([
       "role-b",
       "role-a",
     ]);
+    expect(repository.clearRosterAccessRoleIfMatches("guild-1", "member-role")).toBe(true);
+    expect(repository.getGuildConfig("guild-1")).toMatchObject({ memberRoleId: null, conscriptRoleId: "conscript-role" });
   });
 
   it("stores the voice lobby and temporary channel ownership", () => {

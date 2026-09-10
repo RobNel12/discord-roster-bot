@@ -3,6 +3,7 @@ import { PermissionFlagsBits, type Client, type Guild, type GuildMember } from "
 import type { RosterRepository } from "../database.js";
 import { buildSquadControlRows } from "../squad-components.js";
 import { isManualEnlistedRank, officerRankForSeconds, rankForSeconds } from "../ranks.js";
+import { resolveRosterAccessConfig, rosterAccess } from "../roster-access.js";
 import { memberLine, buildRosterEmbeds, escapeRosterText, type RosterSection } from "./format.js";
 import { MemberDirectory } from "./member-directory.js";
 import { MissingRosterChannelError, RosterPublisher } from "./publisher.js";
@@ -35,7 +36,7 @@ export class RosterService {
 
   async syncRoleRoster(guildId: string, reconcileMembers = false): Promise<void> {
     const guild = this.getGuild(guildId);
-    const config = this.repository.getGuildConfig(guildId);
+    const config = resolveRosterAccessConfig(guild, this.repository);
     if (!config.roleRosterChannelId) {
       await this.publisher.retryQueuedCleanup(guild, "role");
       return;
@@ -60,7 +61,9 @@ export class RosterService {
       const roleMembers = [...members.values()]
         .filter(
           (member) =>
-            member.roles.cache.has(role.id) && (config.includeBots || !member.user.bot),
+            member.roles.cache.has(role.id) &&
+            (config.includeBots || !member.user.bot) &&
+            rosterAccess(member, config) === "member",
         )
         .sort(compareMembers);
 
@@ -70,9 +73,12 @@ export class RosterService {
       });
       }
       const hasPriority = sections.some((section) => section.name.startsWith("⭐"));
+      const accessText = config.memberRoleId
+        ? `Roster members: <@&${config.memberRoleId}>`
+        : undefined;
       return buildRosterEmbeds({
         title: `Role roster — ${page.name}`,
-        ...(hasPriority ? { description: "⭐ High-priority role" } : {}),
+        ...((hasPriority || accessText) ? { description: [hasPriority ? "⭐ High-priority role" : null, accessText].filter(Boolean).join("\n") } : {}),
         emptyText: "No roles are assigned to this page.",
         sections,
         color: 0x57_f2_87,
@@ -127,7 +133,7 @@ export class RosterService {
 
   async syncSquadRoster(guildId: string, reconcileMembers = false): Promise<void> {
     const guild = this.getGuild(guildId);
-    const config = this.repository.getGuildConfig(guildId);
+    const config = resolveRosterAccessConfig(guild, this.repository);
     if (!config.squadRosterChannelId) {
       await this.publisher.retryQueuedCleanup(guild, "squad");
       return;
@@ -135,7 +141,10 @@ export class RosterService {
 
     const members = await this.members.getCompleteMembers(guild, reconcileMembers);
     const eligibleMembers = [...members.values()]
-      .filter((member) => config.includeBots || !member.user.bot)
+      .filter((member) =>
+        (config.includeBots || !member.user.bot) &&
+        rosterAccess(member, config) !== null,
+      )
       .sort(compareMembers);
     const squads = this.repository.listSquads(guildId);
     const squadIds = new Set(squads.map((squad) => squad.id));
@@ -158,7 +167,8 @@ export class RosterService {
       membershipByUser.set(membership.userId, membership.squadId);
 
       const squadMembers = assignments.get(membership.squadId) ?? [];
-      if (config.includeBots || !member.user.bot) {
+      if ((config.includeBots || !member.user.bot) &&
+          rosterAccess(member, config) !== null) {
         squadMembers.push(member);
         assignedUserIds.add(member.id);
       }
@@ -166,6 +176,17 @@ export class RosterService {
     }
 
     const sections: RosterSection[] = [];
+    if (config.conscriptRoleId) {
+      const squadById = new Map(squads.map((squad) => [squad.id, squad]));
+      const conscripts = eligibleMembers.filter((member) => rosterAccess(member, config) === "conscript");
+      sections.push({
+        name: `Conscripts — ${conscripts.length}`,
+        lines: conscripts.map((member) => {
+          const squad = squadById.get(membershipByUser.get(member.id) ?? -1);
+          return `${memberLine(member, "Conscript", loadoutAssignments.get(member.id))}${squad ? ` — ${escapeRosterText(squad.name)}` : " — Unassigned"}`;
+        }),
+      });
+    }
     if (config.squadLeaderRoleId) {
       const squadById = new Map(squads.map((squad) => [squad.id, squad]));
       const leaders = eligibleMembers.filter((member) => member.roles.cache.has(config.squadLeaderRoleId!));
@@ -173,7 +194,8 @@ export class RosterService {
         name: `Squad Leaders — ${leaders.length}`,
         lines: leaders.map((member) => {
           const squad = squadById.get(membershipByUser.get(member.id) ?? -1);
-          return `${memberLine(member, this.memberRank(guild, member, config.squadLeaderRoleId))}${squad ? ` — ${escapeRosterText(squad.name)}` : " — Unassigned"}`;
+          const rank = rosterAccess(member, config) === "conscript" ? "Conscript" : this.memberRank(guild, member, config.squadLeaderRoleId);
+          return `${memberLine(member, rank)}${squad ? ` — ${escapeRosterText(squad.name)}` : " — Unassigned"}`;
         }),
       });
     }
@@ -181,13 +203,17 @@ export class RosterService {
       const squadMembers = (assignments.get(squad.id) ?? []).sort(compareMembers);
       return {
         name: `${this.repository.isSquadLocked(guildId, squad.id) ? "🔒" : "🔓"} ${squad.name} — ${squadMembers.length}`,
-        lines: squadMembers.map((member) => memberLine(member, this.memberRank(guild, member, config.squadLeaderRoleId), loadoutAssignments.get(member.id))),
+        lines: squadMembers.map((member) => memberLine(
+          member,
+          rosterAccess(member, config) === "conscript" ? "Conscript" : this.memberRank(guild, member, config.squadLeaderRoleId),
+          loadoutAssignments.get(member.id),
+        )),
       };
     }));
     const unassigned = eligibleMembers.filter((member) => !assignedUserIds.has(member.id));
     sections.push({
       name: `Unassigned — ${unassigned.length}`,
-      lines: unassigned.map((member) => memberLine(member)),
+      lines: unassigned.map((member) => memberLine(member, rosterAccess(member, config) === "conscript" ? "Conscript" : undefined)),
     });
 
     // Reload after the member fetch so a server manager's newer setting is never
@@ -202,9 +228,12 @@ export class RosterService {
       : "Squad managers: members with Manage Server";
     const selfServiceText =
       "Self-service: choose a squad below to join or move; use the leave button to become Unassigned.";
+    const accessText = config.memberRoleId && config.conscriptRoleId
+      ? `Access: <@&${config.memberRoleId}> members earn ranks; <@&${config.conscriptRoleId}> conscripts can join squads without rank progress.`
+      : null;
     const embeds = buildRosterEmbeds({
       title: "Squad roster",
-      description: `${managerText}\n${selfServiceText}`,
+      description: [managerText, accessText, selfServiceText].filter(Boolean).join("\n"),
       emptyText: "No squad information is available.",
       sections,
       color: 0xfe_a5_1d,

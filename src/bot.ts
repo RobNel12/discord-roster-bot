@@ -136,7 +136,8 @@ export class RosterBot {
     this.client.on(Events.GuildRoleDelete, (role) => {
       const tracked = this.repository.removeTrackedRole(role.guild.id, role.id);
       const wasLeader = this.repository.clearSquadLeaderRoleIfMatches(role.guild.id, role.id);
-      if (tracked && wasLeader) {
+      const wasAccessRole = this.repository.clearRosterAccessRoleIfMatches(role.guild.id, role.id);
+      if (wasAccessRole || tracked && wasLeader) {
         this.scheduler.schedule(role.guild.id, "both");
       } else if (tracked) {
         this.scheduler.schedule(role.guild.id, "role");

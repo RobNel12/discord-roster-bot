@@ -177,6 +177,43 @@ describe("RosterService", () => {
     });
   });
 
+  it("separates conscripts, keeps them in squads, and limits role-roster membership", async () => {
+    const memberRoleId = "100000000000000021";
+    const conscriptRoleId = "100000000000000022";
+    const trackedRoleId = "100000000000000023";
+    const members = new Collection<string, GuildMember>([
+      ["full", fakeMember("full", "Full Member", [memberRoleId, trackedRoleId])],
+      ["conscript", fakeMember("conscript", "Conscript", [conscriptRoleId, trackedRoleId])],
+      ["both", fakeMember("both", "Both", [memberRoleId, conscriptRoleId, trackedRoleId])],
+      ["outsider", fakeMember("outsider", "Outsider", [trackedRoleId])],
+    ]);
+    const roles = new Collection<string, Role>([
+      [memberRoleId, fakeRole(memberRoleId, "Member")],
+      [conscriptRoleId, fakeRole(conscriptRoleId, "Conscript")],
+      [trackedRoleId, fakeRole(trackedRoleId, "Tracked")],
+    ]);
+    const harness = createHarness(members, roles);
+    harness.repository.setRosterAccessRoles(harness.guild.id, memberRoleId, conscriptRoleId);
+    harness.repository.setRoleRosterChannel(harness.guild.id, "role-channel");
+    harness.repository.setSquadRosterChannel(harness.guild.id, "squad-channel");
+    harness.repository.addTrackedRole(harness.guild.id, trackedRoleId);
+    const squad = harness.repository.createSquad(harness.guild.id, "Alpha", "admin");
+    harness.repository.assignMember(harness.guild.id, "conscript", squad.id, "admin");
+
+    await harness.service.syncBoth(harness.guild.id);
+
+    const roleFields = harness.publications.find(publication => publication.type === "role")?.pages[0]?.toJSON().fields ?? [];
+    expect(roleFields[0]?.value).toContain("<@full>");
+    expect(roleFields[0]?.value).toContain("<@both>");
+    expect(roleFields[0]?.value).not.toContain("<@conscript>");
+    expect(roleFields[0]?.value).not.toContain("<@outsider>");
+    const squadFields = harness.publications.find(publication => publication.type === "squad")?.pages[0]?.toJSON().fields ?? [];
+    expect(squadFields.map(field => field.name)).toEqual(["Conscripts — 1", "🔓 Alpha — 1", "Unassigned — 2"]);
+    expect(squadFields[0]?.value).toContain("<@conscript> — **Conscript** — Alpha");
+    expect(squadFields[1]?.value).toContain("<@conscript> — **Conscript**");
+    expect(JSON.stringify(squadFields)).not.toContain("outsider");
+  });
+
   it("clears a leader role that was deleted while the bot was offline", async () => {
     const harness = createHarness();
     harness.repository.setSquadRosterChannel(harness.guild.id, "squad-channel");

@@ -61,7 +61,9 @@ describe("application command definitions", () => {
   it("offers setup, hierarchy sorting, and bulk role clearing", () => {
     const roster = commandJson.find((command) => command.name === "roster");
     expect(roster?.options?.map((option) => option.name)).toEqual(
-      expect.arrayContaining(["setup", "sort", "clear-roles"]),
+      expect.arrayContaining(["set-access-roles", "clear-access-roles", "setup", "sort", "clear-roles"]),
     );
+    const access = roster?.options?.find(option => option.name === "set-access-roles");
+    expect(access && "options" in access ? access.options?.map(option => option.name) : []).toEqual(["member-role", "conscript-role"]);
   });
 });

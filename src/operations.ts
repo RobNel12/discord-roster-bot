@@ -5,6 +5,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, MessageFlags
 import type { RosterRepository } from "./database.js";
 import type { SummonsPost } from "./operation-types.js";
 import { buildRosterEmbeds, memberLine } from "./rosters/format.js";
+import { rosterAccess } from "./roster-access.js";
 
 export class SummonsError extends Error {}
 
@@ -18,6 +19,7 @@ export async function serializeSummons<T>(key: string, action: () => Promise<T>)
 
 export function renderSummons(guild: Guild, repository: RosterRepository, post: SummonsPost) {
   const squad = post.squadId === null ? null : repository.getSquad(post.guildId, post.squadId);
+  const config = repository.getGuildConfig(post.guildId);
   const loadouts = new Map(repository.listSquadLoadoutAssignments(post.guildId, post.squadId ?? -1).map(a => [a.userId, a.roleName]));
   const ids = [...post.memberIds].sort((a, b) => {
     const left = guild.members.cache?.get(a)?.displayName ?? a;
@@ -37,7 +39,8 @@ ${readyCount}/${ids.length} ready · ${post.phase !== "closed" && post.squadLock
       const member = guild.members.cache?.get(id);
       const general = id === guild.ownerId || Boolean(member?.permissions.has(PermissionFlagsBits.ManageGuild));
       const rank = state.manualRank ?? (state.rankTrack === "officer" ? officerRankForSeconds(seconds, general) : rankForSeconds(seconds));
-      return `${memberLine({ id }, rank, loadouts.get(id))} — ${post.ready[id] ? "✅ Ready" : "❌ Not ready"}`;
+      const access = member ? rosterAccess(member, config) : null;
+      return `${memberLine({ id }, access === "conscript" ? "Conscript" : rank, loadouts.get(id))} — ${post.ready[id] ? "✅ Ready" : "❌ Not ready"}`;
     }) }],
   });
 }
@@ -60,7 +63,15 @@ export async function publishSummons(guild: Guild, repository: RosterRepository,
   if (post.phase !== "closed") {
     const squad = post.squadId === null ? null : repository.getSquad(post.guildId, post.squadId);
     if (squad) post.title = `${squad.name}, form up!`;
-    post.memberIds = repository.listMemberships(post.guildId).filter(m => m.squadId === post.squadId).map(m => m.userId);
+    const config = repository.getGuildConfig(post.guildId);
+    post.memberIds = repository.listMemberships(post.guildId)
+      .filter(m => m.squadId === post.squadId)
+      .map(m => m.userId)
+      .filter(userId => {
+        if (!config.memberRoleId && !config.conscriptRoleId) return true;
+        const member = guild.members.cache?.get(userId);
+        return member ? rosterAccess(member, config) !== null : false;
+      });
     const current = new Set(post.memberIds);
     for (const userId of Object.keys(post.ready)) if (!current.has(userId)) delete post.ready[userId];
     repository.saveSummonsPost(post);
@@ -102,14 +113,19 @@ export async function createSummons(guild: Guild, repository: RosterRepository, 
     }
     const squad = repository.getSquad(guild.id, squadId);
     if (!squad) throw new Error("This squad no longer exists.");
-    const memberIds = repository.listMemberships(guild.id).filter(m => m.squadId === squadId).map(m => m.userId);
+    const config = repository.getGuildConfig(guild.id);
+    const memberIds = repository.listMemberships(guild.id).filter(m => m.squadId === squadId).map(m => m.userId).filter(userId => {
+      if (!config.memberRoleId && !config.conscriptRoleId) return true;
+      const member = guild.members.cache?.get(userId);
+      return member ? rosterAccess(member, config) !== null : false;
+    });
     const post: SummonsPost = { id: randomUUID(), guildId: guild.id, channelId, messageIds: [], announcementMessageIds: [], kind: "summons", title: `${squad.name}, form up!`, squadId, memberIds, ready: {}, phase: "ready" };
     repository.saveSummonsPost(post);
     await publishSummons(guild, repository, post);
     const channel = await guild.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !("send" in channel)) return;
-    for (let i = 0; i < memberIds.length; i += 50) {
-      const batch = memberIds.slice(i, i + 50);
+    for (let i = 0; i < post.memberIds.length; i += 50) {
+      const batch = post.memberIds.slice(i, i + 50);
       const pingMessage = await channel.send({ content: `<@${callerId}> is calling the squad: ${batch.map(id => `<@${id}>`).join(" ")}\nhttps://discord.com/channels/${guild.id}/${channelId}/${post.messageIds[0]}`, allowedMentions: { parse: [], users: batch } });
       post.announcementMessageIds?.push(pingMessage.id);
     }
@@ -188,8 +204,9 @@ export async function handleReadyReaction(reaction: MessageReaction | PartialMes
   await serializeSummons(guild.id, async () => {
     const post = repository.getSummonsPosts(guild.id).find(p => p.phase === "ready" && p.channelId === reaction.message.channelId && p.messageIds.includes(reaction.message.id));
     if (!post) return;
+    const member = await guild.members.fetch(user.id).catch(() => null);
     const eligible = repository.getMembership(guild.id, user.id)?.squadId === post.squadId;
-    if (!eligible || !await guild.members.fetch(user.id).catch(() => null)) return;
+    if (!eligible || !member || rosterAccess(member, repository.getGuildConfig(guild.id)) === null) return;
     post.ready[user.id] = reaction.emoji.name === "✅";
     repository.saveSummonsPost(post);
     await publishSummons(guild, repository, post);

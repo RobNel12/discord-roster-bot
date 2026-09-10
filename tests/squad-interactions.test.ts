@@ -116,6 +116,29 @@ describe("squad component interactions", () => {
     expect(lastReply(mock)).toContain("You joined **Alpha**");
   });
 
+  it("allows conscripts to join squads and rejects users outside both access roles", async () => {
+    const alpha = repository.createSquad(GUILD_ID, "Alpha", "admin");
+    repository.setRosterAccessRoles(GUILD_ID, "member-role", "conscript-role");
+    (guild.members.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: USER_ID,
+      user: { bot: false },
+      roles: { cache: { has: (roleId: string) => roleId === "conscript-role" } },
+    });
+    await handleSquadComponentInteraction(joinInteraction(guild, String(alpha.id)).interaction, context);
+    expect(repository.getMembership(GUILD_ID, USER_ID)?.squadId).toBe(alpha.id);
+
+    repository.unassignMember(GUILD_ID, USER_ID);
+    (guild.members.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: USER_ID,
+      user: { bot: false },
+      roles: { cache: { has: () => false } },
+    });
+    const rejected = joinInteraction(guild, String(alpha.id));
+    await handleSquadComponentInteraction(rejected.interaction, context);
+    expect(repository.getMembership(GUILD_ID, USER_ID)).toBeNull();
+    expect(lastReply(rejected)).toContain("Member or Conscript role");
+  });
+
   it("moves between squads while preserving exactly one membership", async () => {
     const alpha = repository.createSquad(GUILD_ID, "Alpha", "admin");
     const bravo = repository.createSquad(GUILD_ID, "Bravo", "admin");

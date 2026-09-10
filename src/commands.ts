@@ -21,6 +21,7 @@ import { SquadNameError } from "./squad-names.js";
 import { MAX_INTERACTIVE_SQUADS } from "./squad-components.js";
 import type { PublishedMessage, RosterTarget, RosterType } from "./types.js";
 import { ENLISTED_RANKS, OFFICER_RANKS, isGeneralOfficerRank, isManualEnlistedRank, isOfficerRank, rankDisplayName, requiredSecondsForRank } from "./ranks.js";
+import { rosterAccess } from "./roster-access.js";
 
 export interface CommandContext {
   repository: RosterRepository;
@@ -123,6 +124,28 @@ async function handleRosterCommand(
 
   const subcommand = interaction.options.getSubcommand();
   switch (subcommand) {
+    case "set-access-roles": {
+      const memberRole = interaction.options.getRole("member-role", true);
+      const conscriptRole = interaction.options.getRole("conscript-role", true);
+      if (memberRole.id === guild.id || conscriptRole.id === guild.id) {
+        await reply(interaction, "Choose roles other than `@everyone`, or use `/roster clear-access-roles`.");
+        return;
+      }
+      if (memberRole.id === conscriptRole.id) {
+        await reply(interaction, "Choose two different roles for Members and Conscripts.");
+        return;
+      }
+      repository.setRosterAccessRoles(guildId, memberRole.id, conscriptRole.id);
+      const note = await refreshAfterMutation(scheduler, guildId, "both");
+      await reply(interaction, `<@&${memberRole.id}> now has full roster, squad, and rank access. <@&${conscriptRole.id}> can participate in squads but does not earn rank time. Member access takes precedence when someone has both roles.${note}`);
+      return;
+    }
+    case "clear-access-roles": {
+      repository.setRosterAccessRoles(guildId, null, null);
+      const note = await refreshAfterMutation(scheduler, guildId, "both");
+      await reply(interaction, `Roster access roles were cleared. All eligible server members have full roster, squad, and rank access again.${note}`);
+      return;
+    }
     case "setup": {
       const channelSelect = new ChannelSelectMenuBuilder()
         .setCustomId(`roster-setup:channel:${interaction.user.id}`)
@@ -552,6 +575,13 @@ async function handleSquadCommand(
     if (subcommand === "set-rank") {
       const user = interaction.options.getUser("member", true);
       const member = await guild.members.fetch(user.id);
+      const access = rosterAccess(member, repository.getGuildConfig(guildId));
+      if (access !== "member") {
+        await reply(interaction, access === "conscript"
+          ? "Conscripts cannot be assigned activity ranks. Give the member the configured Member role first."
+          : "That user does not have the configured Member role.");
+        return;
+      }
       const rank = interaction.options.getString("rank", true);
       const seconds = requiredSecondsForRank(rank);
       if (seconds === null) {
@@ -612,6 +642,13 @@ async function handleSquadCommand(
     const user = interaction.options.getUser("member") ?? interaction.user;
     const member = await guild.members.fetch(user.id);
     const config = repository.getGuildConfig(guildId);
+    const access = rosterAccess(member, config);
+    if (access !== "member") {
+      await reply(interaction, access === "conscript"
+        ? `<@${user.id}> is a **Conscript** and does not earn rank time.`
+        : `<@${user.id}> does not have roster membership access.`);
+      return;
+    }
     const canReachGeneral = member.id === guild.ownerId || member.permissions.has(PermissionFlagsBits.ManageGuild);
     const isOfficer = canReachGeneral || Boolean(config.squadLeaderRoleId && member.roles.cache.has(config.squadLeaderRoleId));
     repository.ensureMemberRankTrack(guildId, user.id, isOfficer ? "officer" : "enlisted");
@@ -726,6 +763,10 @@ async function handleSquadCommand(
       const member = await guild.members.fetch(user.id);
       if (member.user.bot && !repository.getGuildConfig(guildId).includeBots) {
         await reply(interaction, "Bots are excluded from this server's rosters.");
+        return;
+      }
+      if (rosterAccess(member, repository.getGuildConfig(guildId)) === null) {
+        await reply(interaction, "That user needs the configured Member or Conscript role before joining a squad.");
         return;
       }
 

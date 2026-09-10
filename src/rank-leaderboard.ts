@@ -1,6 +1,7 @@
 import { PermissionFlagsBits, type Guild } from "discord.js";
 import type { RosterRepository } from "./database.js";
 import { ALL_RANK_ABBREVIATIONS, isManualEnlistedRank, officerRankForSeconds, rankDisplayName, rankForSeconds } from "./ranks.js";
+import { resolveRosterAccessConfig, rosterAccess } from "./roster-access.js";
 import { buildRosterEmbeds } from "./rosters/format.js";
 
 export async function publishLeaderboard(guild: Guild, repository: RosterRepository): Promise<void> {
@@ -48,8 +49,10 @@ export async function publishLeaderboard(guild: Guild, repository: RosterReposit
 }
 
 export function rankLeaderboard(guild: Guild, repository: RosterRepository, track = "all") {
-  const config = repository.getGuildConfig(guild.id);
-  return [...guild.members.cache.values()].filter(member => !member.user.bot).map(member => {
+  const config = resolveRosterAccessConfig(guild, repository);
+  return [...guild.members.cache.values()].filter(member =>
+    !member.user.bot && rosterAccess(member, config) === "member",
+  ).map(member => {
     const general = member.id === guild.ownerId || member.permissions.has(PermissionFlagsBits.ManageGuild);
     const officer = general || Boolean(config.squadLeaderRoleId && member.roles.cache.has(config.squadLeaderRoleId));
     const rankTrack = officer ? "officer" : "enlisted";

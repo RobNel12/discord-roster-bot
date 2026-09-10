@@ -19,6 +19,7 @@ import {
   SQUAD_LEAVE_CUSTOM_ID,
 } from "./squad-components.js";
 import { escapeRosterText } from "./rosters/format.js";
+import { rosterAccess } from "./roster-access.js";
 
 type SquadComponentInteraction = ButtonInteraction | StringSelectMenuInteraction;
 const CALL_COOLDOWN_MS = 60_000;
@@ -87,6 +88,11 @@ export async function handleSquadComponentInteraction(
       return true;
     }
 
+    if (isJoin && rosterAccess(member, config) === null) {
+      await editReply(interaction, `You need the configured Member or Conscript role before you can join a roster squad.`);
+      return true;
+    }
+
     if (isClearLoadout) {
       const isManager = member.permissions.has(PermissionFlagsBits.ManageGuild) || Boolean(config.squadLeaderRoleId && member.roles.cache.has(config.squadLeaderRoleId));
       if (!isManager) {
@@ -130,9 +136,11 @@ export async function handleSquadComponentInteraction(
         return true;
       }
       const voiceMembers = [...voiceChannel.members.values()].filter((candidate) => !candidate.user.bot);
-      const refreshedMembers = await Promise.all(voiceMembers.map(async (candidate) =>
+      const refreshedMembers = (await Promise.all(voiceMembers.map(async (candidate) =>
         guild.members.fetch({ user: candidate.id, force: true }).catch(() => candidate),
-      ));
+      ))).filter(candidate =>
+        rosterAccess(candidate, config) !== null && repository.getMembership(guildId, candidate.id)?.squadId === squad.id,
+      );
       const candidates = refreshedMembers.map((candidate) => {
         const parsedPreferences = loadoutPreferencesFromRoleNames(
           [...candidate.roles.cache.values()].map((role) => role.name),

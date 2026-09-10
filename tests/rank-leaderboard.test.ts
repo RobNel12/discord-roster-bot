@@ -13,7 +13,7 @@ function setup() {
   const members = new Collection<string, GuildMember>();
   const member = (id: string, officer = false, bot = false) => ({ id, user: { bot }, permissions: { has: () => false }, roles: { cache: { has: () => officer } }, send: vi.fn() }) as unknown as GuildMember;
   members.set("a", member("a")); members.set("b", member("b")); members.set("c", member("c", true)); members.set("bot", member("bot", false, true));
-  const guild = { id: "g", ownerId: "owner", members: { cache: members, fetch: vi.fn(async (id: string) => members.get(id)) }, channels: { fetch: vi.fn() } } as unknown as Guild;
+  const guild = { id: "g", ownerId: "owner", roles: { cache: new Collection([["member", {}], ["conscript", {}]]) }, members: { cache: members, fetch: vi.fn(async (id: string) => members.get(id)) }, channels: { fetch: vi.fn() } } as unknown as Guild;
   repo.setSquadLeaderRole("g", "officers");
   return { guild, members };
 }
@@ -30,6 +30,46 @@ it("orders by rank then live track time, supports tracks and excludes bots/depar
   expect(rankLeaderboard(guild, repo, "officer").map(entry => entry.rank)).toEqual(["2LT"]);
   repo.setManualRank("g", "a", "SMA");
   expect(rankLeaderboard(guild, repo, "enlisted")[0]?.id).toBe("a");
+});
+
+it("includes full members in ranks while excluding conscripts and outsiders", () => {
+  const { guild, members } = setup();
+  const withRoles = (id: string, roles: string[]) => ({
+    id, user: { bot: false }, permissions: { has: () => false },
+    roles: { cache: { has: (roleId: string) => roles.includes(roleId) } }, send: vi.fn(),
+  }) as unknown as GuildMember;
+  members.set("a", withRoles("a", ["member"]));
+  members.set("b", withRoles("b", ["conscript"]));
+  members.set("c", withRoles("c", []));
+  members.set("both", withRoles("both", ["member", "conscript"]));
+  repo.setRosterAccessRoles("g", "member", "conscript");
+
+  expect(rankLeaderboard(guild, repo).map(entry => entry.id).sort()).toEqual(["a", "both"]);
+  expect(repo.getMemberRankState("g", "b").activitySeconds).toBe(0);
+});
+
+it("lets conscripts use squad voice without starting rank activity", async () => {
+  const { guild, members } = setup();
+  const roleMember = (id: string, roleId: string) => ({
+    id, user: { bot: false }, permissions: { has: () => false },
+    roles: { cache: { has: (candidate: string) => candidate === roleId } }, send: vi.fn(),
+  }) as unknown as GuildMember;
+  const full = roleMember("full", "member");
+  const conscript = roleMember("conscript", "conscript");
+  members.set(full.id, full);
+  members.set(conscript.id, conscript);
+  repo.setRosterAccessRoles("g", "member", "conscript");
+  const squad = repo.createSquad("g", "Alpha", "admin");
+  repo.assignMember("g", full.id, squad.id, "admin");
+  repo.assignMember("g", conscript.id, squad.id, "admin");
+  repo.upsertTemporaryVoiceChannel("g", "voice", full.id, squad.id);
+  const service = new TemporaryVoiceService(repo, { schedule: vi.fn() } as unknown as RosterScheduler);
+
+  await service.handleVoiceStateUpdate({ guild, channelId: null } as VoiceState, { guild, channelId: "voice", member: conscript } as VoiceState);
+  await service.handleVoiceStateUpdate({ guild, channelId: null } as VoiceState, { guild, channelId: "voice", member: full } as VoiceState);
+
+  expect(repo.listActiveVoiceSessions("g")).toEqual([{ userId: "full", squadId: squad.id }]);
+  service.stop();
 });
 
 it("wipes only the selected server/member, clears appointments, and rebases active time", () => {

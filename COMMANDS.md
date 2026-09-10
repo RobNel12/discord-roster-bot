@@ -14,6 +14,8 @@ Select autocomplete results for squad and page arguments; the bot uses their IDs
 
 | Command | Access | Arguments | Purpose |
 | --- | --- | --- | --- |
+| `/roster set-access-roles` | Server manager | `member-role`: Full Member role<br>`conscript-role`: Limited Conscript role | Limit participation to Members and Conscripts; Conscripts can use squads but do not earn ranks |
+| `/roster clear-access-roles` | Server manager | None | Give all otherwise eligible server members full roster and rank access |
 | `/roster setup` | Server manager | None | Set up the role roster with guided menus |
 | `/roster add-page` | Server manager | `name`: Page name | Add a named page to the role roster |
 | `/roster remove-page` | Server manager | `page`: Page to remove<br>`confirm`: Confirm page removal | Remove a page and move its roles to another page |
@@ -93,6 +95,8 @@ The orange summons embed shows the squad's members, ranks, loadouts, readiness, 
 
 The main squad roster also shows each squad's current lock emoji. Explicit `/squad assign` and `/squad unassign` commands still work while locked. Locks do not change voice-channel permissions or prevent readiness responses.
 
+When roster access roles are configured, both Members and Conscripts can use squad controls. Conscripts appear in the dedicated **Conscripts** section and in their assigned squads with **Conscript** in place of a rank. Only the Member role appears on the normal role roster and rank leaderboards or accrues rank voice time. Member access wins when a user holds both roles. Users with neither role cannot be assigned or self-join; changing roles does not delete stored assignments or rank history.
+
 The most recently added reaction wins. Removing a reaction alone does not change readiness. With Manage Messages, the bot clears each response reaction so it can be clicked repeatedly; without it, remove and re-add your reaction to repeat that response. Controls and saved state survive restarts. Closed summons cannot be reopened; use **Call my squad** to create a new one.
 
 ## Common workflows
@@ -101,6 +105,7 @@ The most recently added reaction wins. Removing a reaction alone does not change
 
 ```text
 /roster setup
+/roster set-access-roles member-role:@Member conscript-role:@Conscript
 /squad set-channel channel:#squad-roster
 /squad set-call-channel channel:#squad-calls
 /squad set-leader-role role:@Squad Leader

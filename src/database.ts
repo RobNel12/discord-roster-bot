@@ -21,6 +21,8 @@ interface GuildConfigRow {
   squad_call_channel_id: string | null;
   rank_update_channel_id: string | null;
   squad_leader_role_id: string | null;
+  member_role_id: string | null;
+  conscript_role_id: string | null;
   temporary_voice_lobby_channel_id: string | null;
   include_bots: number;
 }
@@ -142,6 +144,8 @@ export class RosterRepository {
         squad_call_channel_id TEXT,
         rank_update_channel_id TEXT,
         squad_leader_role_id TEXT,
+        member_role_id TEXT,
+        conscript_role_id TEXT,
         temporary_voice_lobby_channel_id TEXT,
         include_bots INTEGER NOT NULL DEFAULT 0 CHECK (include_bots IN (0, 1)),
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -305,6 +309,12 @@ export class RosterRepository {
     if (!configColumns.some((column) => column.name === "rank_update_channel_id")) {
       this.database.exec("ALTER TABLE guild_config ADD COLUMN rank_update_channel_id TEXT;");
     }
+    if (!configColumns.some((column) => column.name === "member_role_id")) {
+      this.database.exec("ALTER TABLE guild_config ADD COLUMN member_role_id TEXT;");
+    }
+    if (!configColumns.some((column) => column.name === "conscript_role_id")) {
+      this.database.exec("ALTER TABLE guild_config ADD COLUMN conscript_role_id TEXT;");
+    }
     const voiceColumns = this.database.prepare("PRAGMA table_info(temporary_voice_channels)").all() as unknown as Array<{ name: string }>;
     if (!voiceColumns.some((column) => column.name === "squad_id")) {
       this.database.exec("ALTER TABLE temporary_voice_channels ADD COLUMN squad_id INTEGER;");
@@ -373,7 +383,7 @@ export class RosterRepository {
     const row = this.database
       .prepare(`
         SELECT guild_id, role_roster_channel_id, squad_roster_channel_id, squad_call_channel_id, rank_update_channel_id,
-               squad_leader_role_id, temporary_voice_lobby_channel_id, include_bots
+               squad_leader_role_id, member_role_id, conscript_role_id, temporary_voice_lobby_channel_id, include_bots
         FROM guild_config
         WHERE guild_id = ?
       `)
@@ -386,6 +396,8 @@ export class RosterRepository {
       squadCallChannelId: row.squad_call_channel_id,
       rankUpdateChannelId: row.rank_update_channel_id,
       squadLeaderRoleId: row.squad_leader_role_id,
+      memberRoleId: row.member_role_id,
+      conscriptRoleId: row.conscript_role_id,
       temporaryVoiceLobbyChannelId: row.temporary_voice_lobby_channel_id,
       includeBots: row.include_bots === 1,
     };
@@ -461,6 +473,26 @@ export class RosterRepository {
         WHERE guild_id = ?
       `)
       .run(roleId, guildId);
+  }
+
+  setRosterAccessRoles(guildId: string, memberRoleId: string | null, conscriptRoleId: string | null): void {
+    this.ensureGuild(guildId);
+    this.database.prepare(`
+      UPDATE guild_config
+      SET member_role_id = ?, conscript_role_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE guild_id = ?
+    `).run(memberRoleId, conscriptRoleId, guildId);
+  }
+
+  clearRosterAccessRoleIfMatches(guildId: string, roleId: string): boolean {
+    const result = this.database.prepare(`
+      UPDATE guild_config
+      SET member_role_id = CASE WHEN member_role_id = ? THEN NULL ELSE member_role_id END,
+          conscript_role_id = CASE WHEN conscript_role_id = ? THEN NULL ELSE conscript_role_id END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE guild_id = ? AND (member_role_id = ? OR conscript_role_id = ?)
+    `).run(roleId, roleId, guildId, roleId, roleId);
+    return Number(result.changes) > 0;
   }
 
   setTemporaryVoiceLobbyChannel(guildId: string, channelId: string | null): void {

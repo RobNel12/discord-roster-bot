@@ -49,6 +49,24 @@ describe("/roster publication management", () => {
     vi.restoreAllMocks();
   });
 
+  it("configures distinct Member and Conscript access roles", async () => {
+    const command = interactionMock({
+      subcommand: "set-access-roles",
+      memberRoleId: "member-role",
+      conscriptRoleId: "conscript-role",
+    });
+    const harness = contextMock(repository);
+
+    await handleChatInputCommand(command.interaction, harness.context);
+
+    expect(repository.getGuildConfig(GUILD_ID)).toMatchObject({
+      memberRoleId: "member-role",
+      conscriptRoleId: "conscript-role",
+    });
+    expect(harness.runNow).toHaveBeenCalledWith(GUILD_ID, "both");
+    expect(lastReply(command)).toContain("does not earn rank time");
+  });
+
   it("requires Manage Server before inspecting the requested roster action", async () => {
     const command = interactionMock({ subcommand: "delete", manager: false });
     const harness = contextMock(repository);
@@ -410,11 +428,13 @@ function contextMock(
 }
 
 function interactionMock(options: {
-  subcommand: "delete" | "move";
+  subcommand: "delete" | "move" | "set-access-roles" | "clear-access-roles";
   manager?: boolean;
   messageId?: string;
   confirm?: boolean;
   destination?: GuildBasedChannel;
+  memberRoleId?: string;
+  conscriptRoleId?: string;
 }): InteractionHarness {
   const destination = options.destination ?? usableTextChannel(DESTINATION_CHANNEL_ID);
   const getSubcommand = vi.fn(() => options.subcommand);
@@ -441,6 +461,9 @@ function interactionMock(options: {
       getString: vi.fn(() => options.messageId ?? ROLE_PAGE_ONE_ID),
       getBoolean: vi.fn(() => options.confirm ?? false),
       getChannel: vi.fn(() => ({ id: destination.id })),
+      getRole: vi.fn((name: string) => ({
+        id: name === "member-role" ? options.memberRoleId : options.conscriptRoleId,
+      })),
     },
     inGuild: () => true,
     deferReply: vi.fn(async () => undefined),

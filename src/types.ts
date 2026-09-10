@@ -8,6 +8,8 @@ export interface GuildConfig {
   squadCallChannelId: string | null;
   rankUpdateChannelId: string | null;
   squadLeaderRoleId: string | null;
+  memberRoleId: string | null;
+  conscriptRoleId: string | null;
   temporaryVoiceLobbyChannelId: string | null;
   includeBots: boolean;
 }

@@ -16,13 +16,14 @@ This bot's moderation tools cover squad assignments, squad entry, ranks, publica
 
 1. Give the bot **View Channel**, **Send Messages**, **Embed Links**, **Read Message History**, **Add Reactions**, and **Manage Messages** in its roster and summons channels.
 2. Run `/roster setup` and finish the private setup menus.
-3. Run `/squad set-channel channel:#squad-roster`.
-4. Run `/squad set-call-channel channel:#squad-calls`.
-5. Run `/squad set-leader-role role:@Squad Leader`.
-6. Run `/squad set-voice-lobby channel:#Create-a-Squad-Channel` if temporary voice is wanted.
-7. Run `/squad set-leaderboard-channel channel:#rank-leaderboard` if a public leaderboard is wanted.
-8. Create squads with `/squad create name:Alpha`, then assign their leaders.
-9. Use `/roster refresh` or `/squad refresh` if a publication does not update after a few seconds.
+3. Run `/roster set-access-roles member-role:@Member conscript-role:@Conscript` if the server uses membership tiers.
+4. Run `/squad set-channel channel:#squad-roster`.
+5. Run `/squad set-call-channel channel:#squad-calls`.
+6. Run `/squad set-leader-role role:@Squad Leader`.
+7. Run `/squad set-voice-lobby channel:#Create-a-Squad-Channel` if temporary voice is wanted.
+8. Run `/squad set-leaderboard-channel channel:#rank-leaderboard` if a public leaderboard is wanted.
+9. Create squads with `/squad create name:Alpha`, then assign their leaders.
+10. Use `/roster refresh` or `/squad refresh` if a publication does not update after a few seconds.
 
 Run `npm run deploy:commands` whenever the bot's slash commands are added, removed, or changed. Restarting the bot alone does not update Discord's command list.
 
@@ -49,6 +50,12 @@ The bot does not grant or remove the squad leader role. Administrators manage th
 ### Members
 
 Members can join, move between, or leave squads through the current squad roster. They can view private rank progress and leaderboard results. They cannot enter a locked squad through self-service controls, but members already inside may leave or move out.
+
+### Conscripts
+
+When access roles are configured, members holding only the Conscript role appear in a dedicated **Conscripts** section and may join squads, use temporary squad voice, receive loadouts, and respond to summons. They display **Conscript** instead of an activity rank and do not accrue rank time or appear on rank leaderboards.
+
+The configured Member role grants full access and takes precedence when someone holds both roles. Users with neither configured role stay off the rosters and cannot be assigned or self-join a squad. Changing access roles preserves existing assignments and rank records. Use `/roster clear-access-roles` to return to full access for all otherwise eligible server members.
 
 ## 2. Required bot permissions
 
@@ -80,6 +87,8 @@ Run `/roster setup` for the guided setup. It lets you choose a channel, create n
 
 You can also maintain it with individual commands:
 
+- `/roster set-access-roles member-role:@Member conscript-role:@Conscript` configures full and limited participation.
+- `/roster clear-access-roles` removes both tier requirements.
 - `/roster add-page name:Leadership` adds a named view.
 - `/roster remove-page page:Leadership confirm:true` removes a view and moves its tracked roles to another page.
 - `/roster add-role role:@Medic` starts tracking a role.

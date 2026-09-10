@@ -14,6 +14,7 @@ The bot edits its existing messages instead of creating a new post for every cha
 - Supports any number of tracked roles; members can appear beneath multiple roles.
 - Gives each member at most one squad assignment at a time.
 - Adds persistent Discord menus to the squad roster for joining, moving, and leaving squads.
+- Supports full Member access and a limited Conscript tier that can join squads without earning ranks.
 - Publishes live squad summons with roster embeds, readiness reactions, and manager-controlled membership locks.
 - Updates open summons as members join or leave, preserving responses without repeating notifications.
 - Grants squad members View Channel and Connect access to their temporary voice channel.
@@ -109,6 +110,7 @@ Create two text channels, then run:
 
 # Or configure individual settings:
 /roster set-channel channel:#role-roster
+/roster set-access-roles member-role:@Member conscript-role:@Conscript
 /roster add-role role:@Command
 /roster add-role role:@Medic
 /roster add-role role:@Recon
@@ -125,6 +127,8 @@ Create two text channels, then run:
 The setup wizard builds a draft before changing the live roster. Choose the publication channel, create any number of named pages, assign up to 12 unique roles to each page, and optionally mark assigned roles as high priority. The roster publishes as one message; when multiple pages exist, use its ⬅️ and ➡️ reactions to cycle through every named view. High-priority roles are marked with a star.
 
 Add tracked roles in the order they should appear. Server managers always retain squad-management access, even when no squad leader role is configured.
+
+`/roster set-access-roles` limits roster participation to two server roles. Members with the configured **Member** role appear normally on the role and squad rosters, can join squads, earn voice ranks, and appear on rank leaderboards. Members with only the configured **Conscript** role can join squads, use squad voice, receive loadouts, and answer summons, but they do not earn rank time or appear on rank leaderboards. They are listed in a dedicated **Conscripts** section and display **Conscript** instead of an activity rank in their squad. If someone has both roles, Member access takes precedence. Users with neither role do not appear and cannot be assigned or self-join a squad. Existing assignments and rank history remain stored when access roles change. `/roster clear-access-roles` restores the original behavior in which every otherwise eligible server member has full access.
 
 When any assigned squad member joins the configured voice lobby, the bot creates a voice channel beside it named for that squad and moves them in. If the squad already has a temporary channel, the member is moved into that existing channel instead. Members who are Unassigned cannot create a channel, and concurrent lobby joins are serialized so squad members cannot create separate channels for the same squad. The bot deletes the tracked squad channel when it becomes empty.
 
