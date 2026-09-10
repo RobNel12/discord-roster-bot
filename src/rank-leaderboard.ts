@@ -1,7 +1,6 @@
 import { PermissionFlagsBits, type Guild } from "discord.js";
 import type { RosterRepository } from "./database.js";
-import { ALL_RANK_ABBREVIATIONS, isManualEnlistedRank, officerRankForSeconds, rankForSeconds } from "./ranks.js";
-import { rankDisplayName } from "./ranks.js";
+import { ALL_RANK_ABBREVIATIONS, isManualEnlistedRank, officerRankForSeconds, rankDisplayName, rankForSeconds } from "./ranks.js";
 import { buildRosterEmbeds } from "./rosters/format.js";
 
 export async function publishLeaderboard(guild: Guild, repository: RosterRepository): Promise<void> {
@@ -13,11 +12,15 @@ export async function publishLeaderboard(guild: Guild, repository: RosterReposit
     const channel = await guild.channels.fetch(publication.channelId);
     if (!channel || !channel.isTextBased() || !("send" in channel)) throw new Error("Leaderboard channel is unavailable.");
     const entries = rankLeaderboard(guild, repository);
-    const embeds = buildRosterEmbeds({ title: "Rank leaderboard", color: 0xfe_a5_1d,
-      description: "Rank first, then current-track voice time. Live sessions included. Officers precede enlisted ranks.",
-      emptyText: "No current members.", sections: entries.length ? [{ name: `Members — ${entries.length}`, lines: entries.map((entry, index) =>
-        `${index + 1}. <@${entry.id}> — **${rankDisplayName(entry.rank)}** · ${Math.floor(entry.seconds / 3600)}h ${Math.floor(entry.seconds % 3600 / 60)}m`,
-      ) }] : [],
+    const embeds = (["officer", "enlisted"] as const).flatMap(track => {
+      const trackEntries = entries.filter(entry => entry.track === track);
+      const label = track === "officer" ? "Officer" : "Enlisted";
+      return buildRosterEmbeds({ title: `${label} rank leaderboard`, color: 0xfe_a5_1d,
+        description: "Ordered by rank, then current-track voice time. Live sessions included.",
+        emptyText: `No current ${label.toLocaleLowerCase("en-US")} members.`, sections: trackEntries.length ? [{ name: `${label} members — ${trackEntries.length}`, lines: trackEntries.map((entry, index) =>
+          `${index + 1}. <@${entry.id}> — **${rankDisplayName(entry.rank)}** · ${Math.floor(entry.seconds / 3600)}h ${Math.floor(entry.seconds % 3600 / 60)}m`,
+        ) }] : [],
+      });
     });
     for (const embed of embeds) {
       const index = pending.findIndex(page => page.channelId === channel.id);

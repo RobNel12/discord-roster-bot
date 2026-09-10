@@ -66,8 +66,10 @@ it("requires server management and explicit confirmation before wiping ranks", a
 it("edits existing leaderboard pages, recovers deleted pages, and removes disabled publications", async () => {
   const { guild } = setup();
   const messages = new Map<string, { id: string; edit: ReturnType<typeof vi.fn> }>();
+  const sentPayloads: Array<{ embeds: Array<{ toJSON(): { title?: string } }> }> = [];
   let counter = 0;
-  const send = vi.fn(async () => {
+  const send = vi.fn(async (payload: { embeds: Array<{ toJSON(): { title?: string } }> }) => {
+    sentPayloads.push(payload);
     const message = { id: String(++counter), edit: vi.fn(async () => message) };
     messages.set(message.id, message);
     return message;
@@ -82,16 +84,20 @@ it("edits existing leaderboard pages, recovers deleted pages, and removes disabl
   vi.mocked(guild.channels.fetch).mockResolvedValue(channel as never);
   repo.setLeaderboardChannel("g", channel.id);
   await publishLeaderboard(guild, repo);
-  expect(send).toHaveBeenCalledOnce();
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(sentPayloads.map(payload => payload.embeds[0]?.toJSON().title)).toEqual([
+    "Officer rank leaderboard", "Enlisted rank leaderboard",
+  ]);
   await publishLeaderboard(guild, repo);
-  expect(send).toHaveBeenCalledOnce();
+  expect(send).toHaveBeenCalledTimes(2);
   expect(messages.get("1")!.edit).toHaveBeenCalledWith(expect.objectContaining({ allowedMentions: { parse: [] } }));
   messages.delete("1");
   await publishLeaderboard(guild, repo);
-  expect(send).toHaveBeenCalledTimes(2);
-  expect(repo.getLeaderboardPublication("g").pages[0]?.messageId).toBe("2");
+  expect(send).toHaveBeenCalledTimes(3);
+  expect(repo.getLeaderboardPublication("g").pages.map(page => page.messageId)).toEqual(["3", "2"]);
   repo.setLeaderboardChannel("g", null);
   await publishLeaderboard(guild, repo);
+  expect(channel.messages.delete).toHaveBeenCalledWith("3");
   expect(channel.messages.delete).toHaveBeenCalledWith("2");
   expect(repo.getLeaderboardPublication("g").pages).toEqual([]);
 });
