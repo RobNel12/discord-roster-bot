@@ -13,6 +13,10 @@ const memberNameCollator = new Intl.Collator("en", {
 });
 
 export class RosterService {
+  async prepareLeaderboardMembers(guildId: string, reconcile: boolean): Promise<void> {
+    const guild = await this.getGuild(guildId);
+    await this.members.getCompleteMembers(guild, reconcile);
+  }
   private readonly members: Pick<MemberDirectory, "getCompleteMembers">;
   private readonly publisher: Pick<RosterPublisher, "publish" | "retryQueuedCleanup">;
   private readonly rolePageIndexes = new Map<string, number>();

@@ -1,5 +1,6 @@
-import { handleOperationInteraction, handleReadyReaction, reconcileOperations } from "./operations.js";
+import { handleSummonsInteraction, handleReadyReaction, reconcileSummons } from "./operations.js";
 import { Client, Events, GatewayIntentBits, Partials, type Interaction } from "discord.js";
+import { publishLeaderboard } from "./rank-leaderboard.js";
 
 import type { AppConfig } from "./config.js";
 import { handleAutocomplete, handleChatInputCommand } from "./commands.js";
@@ -149,6 +150,10 @@ export class RosterBot {
         return;
       }
       const guildId = channel.guild.id;
+      if (this.repository.getLeaderboardPublication(guildId).channelId === channel.id) {
+        this.repository.setLeaderboardChannel(guildId, null);
+        this.scheduler.schedule(guildId, "squad");
+      }
       const roleChannel = this.repository.clearRoleRosterChannelIfMatches(guildId, channel.id);
       const squadChannel = this.repository.clearSquadRosterChannelIfMatches(guildId, channel.id);
       const squadCallChannel = this.repository.clearSquadCallChannelIfMatches(guildId, channel.id);
@@ -211,7 +216,7 @@ export class RosterBot {
 
   private async handleInteraction(interaction: Interaction): Promise<void> {
     try {
-      if (await handleOperationInteraction(interaction, this.repository, this.scheduler)) return;
+      if (await handleSummonsInteraction(interaction, this.repository, this.scheduler)) return;
       const loadoutConfigHandled = await handleLoadoutConfigInteraction(interaction, this.repository, this.scheduler);
       if (loadoutConfigHandled) return;
       const rosterSetupHandled = await handleRosterSetupInteraction(interaction, {
@@ -267,6 +272,9 @@ export class RosterBot {
     target: RosterTarget,
     reconcileMembers: boolean,
   ): Promise<void> {
+    if (target !== "role" && this.repository.getLeaderboardPublication(guildId).channelId) {
+      await this.service.prepareLeaderboardMembers(guildId, reconcileMembers);
+    }
     if (target === "role") {
       await this.service.syncRoleRoster(guildId, reconcileMembers);
     } else if (target === "squad") {
@@ -277,8 +285,10 @@ export class RosterBot {
     if (target !== "role") {
       const guild = this.client.guilds.cache.get(guildId);
       if (guild) {
+        await publishLeaderboard(guild, this.repository);
+        this.temporaryVoice.refreshRankTimers(guild);
         await this.temporaryVoice.syncGuildPermissions(guild);
-        await reconcileOperations(guild, this.repository);
+        await reconcileSummons(guild, this.repository);
       }
     }
   }

@@ -1,17 +1,15 @@
-export interface OperationPost {
+/** Persisted squad-summons state. The backing table retains its historical name for upgrades. */
+export interface SummonsPost {
   id: string;
   guildId: string;
   channelId: string;
   messageIds: string[];
   announcementMessageIds?: string[];
-  kind: "summons" | "operation";
+  kind: "summons";
   title: string;
-  description: string;
-  startsAt: number | null;
   squadId: number | null;
   memberIds: string[];
-  responses: Record<string, "going" | "maybe" | "unavailable">;
   ready: Record<string, boolean>;
   squadLocked?: boolean;
-  phase: "signup" | "ready" | "closed";
+  phase: "ready" | "closed";
 }

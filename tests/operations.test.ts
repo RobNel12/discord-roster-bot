@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Guild, Interaction, MessageReaction, User } from "discord.js";
 import { ChannelType } from "discord.js";
 import { RosterRepository } from "../src/database.js";
-import { handleOperationInteraction, handleReadyReaction, renderOperation, renderSummons, reconcileOperations, serializeOperation } from "../src/operations.js";
-import type { OperationPost } from "../src/operation-types.js";
+import { handleSummonsInteraction, handleReadyReaction, renderSummons, reconcileSummons, serializeSummons } from "../src/operations.js";
+import type { SummonsPost } from "../src/operation-types.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +14,8 @@ function fixture() {
   const repository = new RosterRepository(":memory:"); repositories.push(repository);
   const squad = repository.createSquad("g", "Alpha", "manager");
   repository.assignMember("g", "member", squad.id, "manager");
-  const post: OperationPost = { id: "post", guildId: "g", channelId: "c", messageIds: ["m"], kind: "summons", title: "Alpha", description: "", startsAt: null, squadId: squad.id, memberIds: ["member"], responses: {}, ready: {}, phase: "ready" };
-  repository.saveOperationPost(post);
+  const post: SummonsPost = { id: "post", guildId: "g", channelId: "c", messageIds: ["m"], kind: "summons", title: "Alpha", squadId: squad.id, memberIds: ["member"], ready: {}, phase: "ready" };
+  repository.saveSummonsPost(post);
   const message = { id: "m", edit: vi.fn(async (_payload: unknown) => undefined), react: vi.fn() };
   const deleteMessage = vi.fn(async (_id: string) => undefined);
   const guild = { id: "g", members: { fetch: vi.fn(async (id: string) => ({ id, permissions: { has: () => id === "manager" }, roles: { cache: { has: () => false } } })) }, channels: { fetch: vi.fn(async () => ({ type: ChannelType.GuildText, isTextBased: () => true, messages: { fetch: vi.fn(async () => message), delete: deleteMessage } })) } } as unknown as Guild;
@@ -24,23 +24,23 @@ function fixture() {
   return { repository, post, guild, reaction, click, message, deleteMessage };
 }
 
-describe("operations and summons", () => {
+describe("squad summons", () => {
   it("restricts locking to managers, persists it, and releases it on close", async () => {
     const f = fixture();
-    await handleOperationInteraction(f.click("member", "lock") as unknown as Interaction, f.repository);
+    await handleSummonsInteraction(f.click("member", "lock") as unknown as Interaction, f.repository);
     expect(f.repository.isSquadLocked("g", f.post.squadId!)).toBe(false);
-    await handleOperationInteraction(f.click("manager", "lock") as unknown as Interaction, f.repository);
+    await handleSummonsInteraction(f.click("manager", "lock") as unknown as Interaction, f.repository);
     expect(f.repository.isSquadLocked("g", f.post.squadId!)).toBe(true);
     expect(f.repository.isSquadLocked("other", f.post.squadId!)).toBe(false);
     expect(f.message.edit).toHaveBeenLastCalledWith(expect.objectContaining({ embeds: expect.any(Array) }));
     await handleReadyReaction(f.reaction("✅"), { id: "member" } as User, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.ready.member).toBe(true);
-    await handleOperationInteraction(f.click("manager", "unlock") as unknown as Interaction, f.repository);
+    expect(f.repository.getSummonsPosts("g")[0]?.ready.member).toBe(true);
+    await handleSummonsInteraction(f.click("manager", "unlock") as unknown as Interaction, f.repository);
     expect(f.repository.isSquadLocked("g", f.post.squadId!)).toBe(false);
-    await handleOperationInteraction(f.click("manager", "lock") as unknown as Interaction, f.repository);
-    await handleOperationInteraction(f.click("manager", "close") as unknown as Interaction, f.repository);
+    await handleSummonsInteraction(f.click("manager", "lock") as unknown as Interaction, f.repository);
+    await handleSummonsInteraction(f.click("manager", "close") as unknown as Interaction, f.repository);
     expect(f.repository.isSquadLocked("g", f.post.squadId!)).toBe(false);
-    await handleOperationInteraction(f.click("manager", "lock") as unknown as Interaction, f.repository);
+    await handleSummonsInteraction(f.click("manager", "lock") as unknown as Interaction, f.repository);
     expect(f.repository.isSquadLocked("g", f.post.squadId!)).toBe(false);
   });
 
@@ -48,10 +48,10 @@ describe("operations and summons", () => {
     const f = fixture();
     f.repository.setSquadLeaderRole("g", "leader");
     vi.mocked(f.guild.members.fetch).mockResolvedValue({ id: "leader-user", permissions: { has: () => false }, roles: { cache: { has: (id: string) => id === "leader" } } } as never);
-    await handleOperationInteraction(f.click("leader-user", "lock") as unknown as Interaction, f.repository);
+    await handleSummonsInteraction(f.click("leader-user", "lock") as unknown as Interaction, f.repository);
     expect(f.repository.isSquadLocked("g", f.post.squadId!)).toBe(false);
     f.repository.assignMember("g", "leader-user", f.post.squadId!, "manager");
-    await handleOperationInteraction(f.click("leader-user", "lock") as unknown as Interaction, f.repository);
+    await handleSummonsInteraction(f.click("leader-user", "lock") as unknown as Interaction, f.repository);
     expect(f.repository.isSquadLocked("g", f.post.squadId!)).toBe(true);
   });
 
@@ -77,84 +77,64 @@ describe("operations and summons", () => {
 
   it("refreshes open summons membership without another ping and preserves existing readiness", async () => {
     const f = fixture();
-    f.post.ready.member = true; f.repository.saveOperationPost(f.post);
+    f.post.ready.member = true; f.repository.saveSummonsPost(f.post);
     f.repository.assignMember("g", "new-member", f.post.squadId!, "manager");
-    await reconcileOperations(f.guild, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]).toMatchObject({ memberIds: ["member", "new-member"], ready: { member: true } });
+    await reconcileSummons(f.guild, f.repository);
+    expect(f.repository.getSummonsPosts("g")[0]).toMatchObject({ memberIds: ["member", "new-member"], ready: { member: true } });
     const payload = f.message.edit.mock.calls.at(-1)?.[0];
     expect(payload).toMatchObject({ content: "", allowedMentions: { parse: [] } });
     expect(JSON.stringify(payload)).toContain("<@new-member>");
     expect(JSON.stringify(payload)).toContain("❌ Not ready");
     f.repository.unassignMember("g", "member");
-    await reconcileOperations(f.guild, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]).toMatchObject({ memberIds: ["new-member"], ready: {} });
-    await handleOperationInteraction(f.click("manager", "close") as unknown as Interaction, f.repository);
+    await reconcileSummons(f.guild, f.repository);
+    expect(f.repository.getSummonsPosts("g")[0]).toMatchObject({ memberIds: ["new-member"], ready: {} });
+    await handleSummonsInteraction(f.click("manager", "close") as unknown as Interaction, f.repository);
     f.repository.assignMember("g", "later", f.post.squadId!, "manager");
-    await reconcileOperations(f.guild, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.memberIds).toEqual(["new-member"]);
+    await reconcileSummons(f.guild, f.repository);
+    expect(f.repository.getSummonsPosts("g")[0]?.memberIds).toEqual(["new-member"]);
   });
 
   it("accepts latest readiness only from current summoned squad members and freezes on close", async () => {
     const f = fixture();
     await handleReadyReaction(f.reaction("✅"), { id: "outsider" } as User, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.ready).toEqual({});
+    expect(f.repository.getSummonsPosts("g")[0]?.ready).toEqual({});
     await handleReadyReaction(f.reaction("✅"), { id: "member" } as User, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.ready.member).toBe(true);
+    expect(f.repository.getSummonsPosts("g")[0]?.ready.member).toBe(true);
     await handleReadyReaction(f.reaction("❌"), { id: "member" } as User, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.ready.member).toBe(false);
-    await handleOperationInteraction(f.click("member", "close") as unknown as Interaction, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.phase).toBe("ready");
-    await handleOperationInteraction(f.click("manager", "close") as unknown as Interaction, f.repository);
+    expect(f.repository.getSummonsPosts("g")[0]?.ready.member).toBe(false);
+    await handleSummonsInteraction(f.click("member", "close") as unknown as Interaction, f.repository);
+    expect(f.repository.getSummonsPosts("g")[0]?.phase).toBe("ready");
+    await handleSummonsInteraction(f.click("manager", "close") as unknown as Interaction, f.repository);
     await handleReadyReaction(f.reaction("✅"), { id: "member" } as User, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]).toMatchObject({ phase: "closed", ready: { member: false } });
+    expect(f.repository.getSummonsPosts("g")[0]).toMatchObject({ phase: "closed", ready: { member: false } });
     expect(f.deleteMessage).toHaveBeenCalledWith("m");
-    expect(f.repository.getOperationPosts("g")[0]?.messageIds).toEqual([]);
-  });
-
-  it("supports changing sign-ups and a manager-started ready check", async () => {
-    const f = fixture(); f.post.kind = "operation"; f.post.phase = "signup"; f.repository.saveOperationPost(f.post);
-    for (const action of ["going", "maybe"]) await handleOperationInteraction(f.click("member", action) as unknown as Interaction, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.responses.member).toBe("maybe");
-    await handleOperationInteraction(f.click("member", "start") as unknown as Interaction, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]?.phase).toBe("signup");
-    await handleOperationInteraction(f.click("manager", "start") as unknown as Interaction, f.repository);
-    await handleReadyReaction(f.reaction("✅"), { id: "member" } as User, f.repository);
-    await handleOperationInteraction(f.click("member", "unavailable") as unknown as Interaction, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]).toMatchObject({ phase: "ready", responses: { member: "maybe" }, ready: { member: true } });
+    expect(f.repository.getSummonsPosts("g")[0]?.messageIds).toEqual([]);
   });
 
   it("rejects stale messages and members who have left the squad", async () => {
     const f = fixture(); f.repository.unassignMember("g", "member");
     await handleReadyReaction(f.reaction("✅"), { id: "member" } as User, f.repository);
     const click = f.click("manager", "close"); click.message.id = "old";
-    await handleOperationInteraction(click as unknown as Interaction, f.repository);
-    expect(f.repository.getOperationPosts("g")[0]).toMatchObject({ phase: "ready", ready: {} });
+    await handleSummonsInteraction(click as unknown as Interaction, f.repository);
+    expect(f.repository.getSummonsPosts("g")[0]).toMatchObject({ phase: "ready", ready: {} });
   });
 
-  it("paginates without losing members or exceeding message limits", () => {
-    const f = fixture(); f.post.memberIds = Array.from({ length: 500 }, (_, i) => String(100000000000000000n + BigInt(i)));
-    const pages = renderOperation(f.post);
-    expect(pages.length).toBeGreaterThan(1);
-    expect(pages.every(p => p.length <= 2000)).toBe(true);
-    for (const id of f.post.memberIds) expect(pages.join("\n")).toContain(`<@${id}>`);
-  });
-
-  it("persists responses across reopening and isolates servers", () => {
-    const dir = mkdtempSync(join(tmpdir(), "operations-"));
+  it("persists summons across reopening and isolates servers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "summons-"));
     try {
       const post = fixture().post; post.squadLocked = true;
-      const first = new RosterRepository(join(dir, "test.sqlite")); first.saveOperationPost(post); first.close();
+      const first = new RosterRepository(join(dir, "test.sqlite")); first.saveSummonsPost(post); first.close();
       const second = new RosterRepository(join(dir, "test.sqlite"));
       expect(second.isSquadLocked("g", post.squadId!)).toBe(true);
-      expect(second.getOperationPosts("g")).toEqual([post]); expect(second.getOperationPosts("other")).toEqual([]); second.close();
+      expect(second.getSummonsPosts("g")).toEqual([post]); expect(second.getSummonsPosts("other")).toEqual([]); second.close();
     } finally { rmSync(dir, { recursive: true }); }
   });
 
   it("serializes concurrent mutations even after a failed action", async () => {
     const order: number[] = [];
     await Promise.allSettled([
-      serializeOperation("test", async () => { await Promise.resolve(); order.push(1); throw new Error("failure"); }),
-      serializeOperation("test", async () => { order.push(2); }),
+      serializeSummons("test", async () => { await Promise.resolve(); order.push(1); throw new Error("failure"); }),
+      serializeSummons("test", async () => { order.push(2); }),
     ]);
     expect(order).toEqual([1, 2]);
   });

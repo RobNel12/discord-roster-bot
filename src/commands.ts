@@ -29,6 +29,7 @@ export interface CommandContext {
 }
 
 const squadAdminSubcommands = new Set([
+  "set-leaderboard-channel", "clear-leaderboard-channel", "wipe-rank", "wipe-ranks",
   "set-call-channel",
   "clear-call-channel",
   "set-channel",
@@ -424,6 +425,34 @@ async function handleSquadCommand(
         interaction,
         "You need the **Manage Server** permission to change squad roster settings.",
       );
+      return;
+    }
+
+    if (subcommand === "wipe-rank" || subcommand === "wipe-ranks") {
+      if (interaction.options.getBoolean("confirm", true) !== true) {
+        await reply(interaction, "Nothing changed. Use confirm:true to permanently erase rank time and manual ranks.");
+        return;
+      }
+      const member = subcommand === "wipe-rank" ? interaction.options.getUser("member", true) : null;
+      repository.wipeRanks(guildId, member?.id);
+      const note = await refreshAfterMutation(scheduler, guildId, "squad");
+      await reply(interaction, `${member ? `Reset rank progress for <@${member.id}>.` : "Reset every member's rank progress in this server."} Manual ranks are cleared; active voice time starts again now. Members return to the starting rank of their current track.${note}`);
+      return;
+    }
+
+    if (subcommand === "set-leaderboard-channel") {
+      const selected = interaction.options.getChannel("channel", true);
+      const channel = await getUsableRosterChannel(guild, selected.id);
+      repository.setLeaderboardChannel(guildId, channel.id);
+      const note = await refreshAfterMutation(scheduler, guildId, "squad");
+      await reply(interaction, `The live rank leaderboard is configured in <#${channel.id}>.${note}`);
+      return;
+    }
+
+    if (subcommand === "clear-leaderboard-channel") {
+      repository.setLeaderboardChannel(guildId, null);
+      const note = await refreshAfterMutation(scheduler, guildId, "squad");
+      await reply(interaction, `The live rank leaderboard is disabled. Any messages that cannot be deleted will be retried during later refreshes.${note}`);
       return;
     }
 

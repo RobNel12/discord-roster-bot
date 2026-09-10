@@ -76,18 +76,20 @@ export class RosterRepository {
     this.database.exec("DELETE FROM active_loadout_role_sessions");
   }
 
-  getOperationPosts(guildId: string): import("./operation-types.js").OperationPost[] {
+  getSummonsPosts(guildId: string): import("./operation-types.js").SummonsPost[] {
     return this.database.prepare("SELECT data FROM operation_posts WHERE guild_id = ? ORDER BY id")
-      .all(guildId).map((row) => JSON.parse(String(row.data)) as import("./operation-types.js").OperationPost);
+      .all(guildId)
+      .map((row) => JSON.parse(String(row.data)) as { kind?: string })
+      .filter((post) => post.kind === "summons") as import("./operation-types.js").SummonsPost[];
   }
 
   isSquadLocked(guildId: string, squadId: number): boolean {
-    return this.getOperationPosts(guildId).some(post =>
-      post.kind === "summons" && post.squadId === squadId && post.phase !== "closed" && post.squadLocked === true,
+    return this.getSummonsPosts(guildId).some(post =>
+      post.squadId === squadId && post.phase !== "closed" && post.squadLocked === true,
     );
   }
 
-  saveOperationPost(post: import("./operation-types.js").OperationPost): void {
+  saveSummonsPost(post: import("./operation-types.js").SummonsPost): void {
     this.database.prepare(`INSERT INTO operation_posts (id, guild_id, data) VALUES (?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET data = excluded.data WHERE guild_id = excluded.guild_id`)
       .run(post.id, post.guildId, JSON.stringify(post));
@@ -111,6 +113,9 @@ export class RosterRepository {
   }
 
   private migrate(): void {
+    this.database.exec(`CREATE TABLE IF NOT EXISTS leaderboard_publications (
+      guild_id TEXT PRIMARY KEY, channel_id TEXT, pages_json TEXT NOT NULL DEFAULT '[]'
+    );`);
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS loadout_templates (
         id INTEGER PRIMARY KEY, guild_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -647,6 +652,33 @@ export class RosterRepository {
       UPDATE active_voice_sessions SET started_at = ? WHERE guild_id = ? AND user_id = ?
     `).run(Math.floor(Date.now() / 1000), guildId, userId);
     return 0;
+  }
+
+  getLeaderboardPublication(guildId: string): { channelId: string | null; pages: Array<{ channelId: string; messageId: string }> } {
+    const row = this.database.prepare("SELECT channel_id, pages_json FROM leaderboard_publications WHERE guild_id = ?")
+      .get(guildId) as unknown as { channel_id: string | null; pages_json: string } | undefined;
+    return { channelId: row?.channel_id ?? null, pages: row ? JSON.parse(row.pages_json) : [] };
+  }
+
+  setLeaderboardChannel(guildId: string, channelId: string | null): void {
+    this.database.prepare(`INSERT INTO leaderboard_publications (guild_id, channel_id) VALUES (?, ?)
+      ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id`).run(guildId, channelId);
+  }
+
+  saveLeaderboardPages(guildId: string, pages: Array<{ channelId: string; messageId: string }>): void {
+    this.database.prepare("UPDATE leaderboard_publications SET pages_json = ? WHERE guild_id = ?").run(JSON.stringify(pages), guildId);
+  }
+
+  wipeRanks(guildId: string, userId?: string): void {
+    this.ensureGuild(guildId);
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const where = userId === undefined ? "guild_id = ?" : "guild_id = ? AND user_id = ?";
+      const params = userId === undefined ? [guildId] : [guildId, userId];
+      this.database.prepare(`UPDATE member_voice_activity SET activity_seconds = 0, manual_rank = NULL WHERE ${where}`).run(...params);
+      this.database.prepare(`UPDATE active_voice_sessions SET started_at = ? WHERE ${where}`).run(Math.floor(Date.now() / 1000), ...params);
+      this.database.exec("COMMIT");
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
 
   setManualRank(guildId: string, userId: string, rank: string | null): void {

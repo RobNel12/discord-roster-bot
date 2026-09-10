@@ -82,7 +82,7 @@ describe("squad component interactions", () => {
     const initial = action === "join" ? undefined : action === "move into locked squad" ? bravo.id : alpha.id;
     if (initial) repository.assignMember(GUILD_ID, USER_ID, initial, "admin");
     for (const squadId of lockDestination ? [alpha.id, bravo.id] : [alpha.id]) {
-      repository.saveOperationPost({ id: `lock-${squadId}`, guildId: GUILD_ID, channelId: "calls", messageIds: [], kind: "summons", title: "Squad", description: "", startsAt: null, squadId, memberIds: [], responses: {}, ready: {}, phase: "ready", squadLocked: true });
+      repository.saveSummonsPost({ id: `lock-${squadId}`, guildId: GUILD_ID, channelId: "calls", messageIds: [], kind: "summons", title: "Squad", squadId, memberIds: [], ready: {}, phase: "ready", squadLocked: true });
     }
     const destination = action === "join" || action === "move into locked squad" ? alpha.id : bravo.id;
     const mock = action === "leave" ? interactionMock("leave", guild) : joinInteraction(guild, String(destination));
@@ -195,7 +195,7 @@ describe("squad component interactions", () => {
     expect(roster).toContain("<@member-3>");
     expect(payload.allowedMentions).toEqual({ parse: [] });
     expect(send.mock.calls[1]?.[0]).toMatchObject({ allowedMentions: { users: [USER_ID, "member-2", "member-3"] } });
-    expect(repository.getOperationPosts(GUILD_ID)[0]?.messageIds).toEqual(["summons-1"]);
+    expect(repository.getSummonsPosts(GUILD_ID)[0]?.messageIds).toEqual(["summons-1"]);
   });
 
   it.each([

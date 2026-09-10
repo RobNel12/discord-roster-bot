@@ -12,6 +12,7 @@ describe("application command definitions", () => {
     expect(squad?.default_member_permissions).toBeUndefined();
     expect(roster?.contexts).toEqual([InteractionContextType.Guild]);
     expect(squad?.contexts).toEqual([InteractionContextType.Guild]);
+    expect(commandJson.map((command) => command.name)).toEqual(["roster", "squad"]);
   });
 
   it("exposes the complete squad-management workflow", () => {
@@ -19,6 +20,7 @@ describe("application command definitions", () => {
     const subcommandNames = squad?.options?.map((option) => option.name);
 
     expect(subcommandNames).toEqual([
+      "set-leaderboard-channel", "clear-leaderboard-channel", "wipe-rank", "wipe-ranks",
       "leaderboard",
       "set-call-channel",
       "clear-call-channel",

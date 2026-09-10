@@ -136,6 +136,14 @@ const squadCommand = new SlashCommandBuilder()
   .setDescription("Configure and manage the live squad roster")
   .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
   .setContexts(InteractionContextType.Guild)
+  .addSubcommand(sub => sub.setName("set-leaderboard-channel").setDescription("Publish or move the automatically updated rank leaderboard")
+    .addChannelOption(o => o.setName("channel").setDescription("Leaderboard channel").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true)))
+  .addSubcommand(sub => sub.setName("clear-leaderboard-channel").setDescription("Disable the rank leaderboard and remove its messages"))
+  .addSubcommand(sub => sub.setName("wipe-rank").setDescription("Reset one member's rank time and manual rank (Manage Server)")
+    .addUserOption(o => o.setName("member").setDescription("Member whose rank is reset").setRequired(true))
+    .addBooleanOption(o => o.setName("confirm").setDescription("Confirm permanent rank reset").setRequired(true)))
+  .addSubcommand(sub => sub.setName("wipe-ranks").setDescription("Reset all rank time and manual ranks in this server (Manage Server)")
+    .addBooleanOption(o => o.setName("confirm").setDescription("Confirm permanent reset for every member in this server").setRequired(true)))
   .addSubcommand(sub => sub.setName("leaderboard").setDescription("Show this server's rank leaderboard privately")
     .addIntegerOption(o => o.setName("page").setDescription("Page number (10 members per page)").setMinValue(1))
     .addStringOption(o => o.setName("track").setDescription("Which rank track to show").addChoices(
@@ -290,14 +298,5 @@ const squadCommand = new SlashCommandBuilder()
     subcommand.setName("refresh").setDescription("Reconcile and republish the squad roster"),
   );
 
-const operationCommand = new SlashCommandBuilder()
-  .setName("operation").setDescription("Schedule an operation with sign-ups and a ready check")
-  .setIntegrationTypes(ApplicationIntegrationType.GuildInstall).setContexts(InteractionContextType.Guild)
-  .addSubcommand(sub => sub.setName("create").setDescription("Post operation sign-ups (squad managers)")
-    .addStringOption(o => o.setName("name").setDescription("Operation name").setMaxLength(100).setRequired(true))
-    .addStringOption(o => o.setName("starts").setDescription("Date with timezone, e.g. 2026-09-12T19:00:00-07:00").setRequired(true))
-    .addChannelOption(o => o.setName("channel").setDescription("Sign-up channel").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
-    .addStringOption(o => o.setName("description").setDescription("Briefing or instructions").setMaxLength(600)));
-
-export const commandData = [rosterCommand, squadCommand, operationCommand] as const;
+export const commandData = [rosterCommand, squadCommand] as const;
 export const commandJson = commandData.map((command) => command.toJSON());

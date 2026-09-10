@@ -16,7 +16,6 @@ The bot edits its existing messages instead of creating a new post for every cha
 - Adds persistent Discord menus to the squad roster for joining, moving, and leaving squads.
 - Publishes live squad summons with roster embeds, readiness reactions, and manager-controlled membership locks.
 - Updates open summons as members join or leave, preserving responses without repeating notifications.
-- Supports operation sign-ups and manager-started ready checks.
 - Grants squad members View Channel and Connect access to their temporary voice channel.
 - Assigns preference-based loadouts and tracks voice activity for automatic ranks.
 - Lets server managers select an existing Discord role as the **squad leader role**.
@@ -183,21 +182,17 @@ The squad roster includes a dedicated **Squad Leaders** section when a squad lea
 
 Use `/squad leaderboard` for a private rank leaderboard with 10 members per page. Optional `page` and `track` arguments select another page or filter to `enlisted` or `officer`. Members are ordered by rank, then current-track voice time including active sessions, then member ID for ties. In the combined view, officers precede enlisted ranks. Bots and departed members are excluded; current server members without activity appear at their starting rank. Switching tracks resets rank time as usual, so this is not a lifetime-hours leaderboard.
 
-## Operation sign-ups and squad summons
+Server managers can publish an automatically updated leaderboard with `/squad set-leaderboard-channel channel:#rank-leaderboard`. It uses persistent embed pages, edits existing messages without pinging, and updates with squad/member changes, rank thresholds, and periodic reconciliation. Deleted pages are recreated on refresh. It also works when no role or squad roster is published. Use the same command to move it; `/squad clear-leaderboard-channel` disables it and removes its pages, retrying failed deletions later. `/squad refresh` refreshes it manually. These dedicated commands manage the leaderboard rather than `/roster move` or `/roster delete`.
 
-Squad managers can schedule an operation in a chosen text channel:
+**Rank resets require Manage Server and explicit confirmation.** `/squad wipe-rank member:@Member confirm:true` resets one member; `/squad wipe-ranks confirm:true` resets all rank progress in this server, including stored records for departed members. Both clear rank voice time and manual appointments. Active voice sessions restart their counters at the reset time so old time cannot be restored on departure. Members return to the starting rank for their current enlisted/officer track. Squad memberships, loadout configuration, templates, and other servers are preserved. The roster and leaderboard refresh afterward. Wipes have no undo command; restore a database backup to recover erased progress.
 
-```text
-/operation create name:Saturday Operation starts:2026-09-12T19:00:00-07:00 channel:#operations description:Meet in squad voice before start.
-```
-
-Enter a future date and include a timezone offset (or `Z` for UTC). Discord displays the start time in each reader's local timezone. Members use **Going**, **Maybe**, or **Unavailable** and can change their response while sign-ups are open. A squad manager presses **Start ready check** to freeze sign-ups and let Going/Maybe participants respond with ✅ or ❌. Ready checks are started manually, not automatically at the scheduled time. **Close operation** freezes all responses and removes its buttons.
+## Squad summons
 
 **Call my squad** opens a persistent squad summons in the same orange embed format as the squad roster, with member ranks, assigned loadouts, readiness beside each name, a ready count, and pagination. Members start as ❌ Not ready. The summons includes **🔓 / 🔒** and **Close squad summons** buttons. A separate notification pings squad members once. Open summons follow current squad membership: new members appear as ❌ Not ready, existing members keep their responses, and departed members are removed. These edits do not send another ping or require reopening the summons. Closed summons retain their final membership. Only one summons can be open per squad, and the existing one-minute call cooldown still applies.
 
 Members react ✅ to mark ready or ❌ to mark not ready. The latest added reaction determines the status beside their name; removing a reaction does not change the saved status. Give the bot **Manage Messages** in these channels to clear each response reaction automatically, allowing repeated clicks. Without it, members must remove and re-add a previously selected reaction to send that response again. Only squad managers (the configured leader role or Manage Server) can close a summons. Closing preserves its final roster and freezes readiness.
 
-Sign-ups, readiness, message IDs, and closed status persist in SQLite. Large lists span multiple messages, each with controls for the same operation or summons. Updates never re-ping members. Open publications are refreshed on startup and during periodic reconciliation, including recovery of deleted pages. Redeploy slash commands with `npm run deploy:commands` after installing this update.
+Readiness, message IDs, and closed status persist in SQLite. Large lists span multiple messages, each with summons controls. Updates never re-ping members. Open summons are refreshed on startup and during periodic reconciliation, including recovery of deleted pages. Redeploy slash commands with `npm run deploy:commands` after installing this update.
 
 Squad managers assigned to the summoned squad can click **🔓** to block self-service joins and moves into the squad. Current members can still leave or move to an unlocked squad. Members with Manage Server can lock or unlock any summoned squad. Explicit manager `/squad assign` and `/squad unassign` commands remain available. Locking does not block readiness reactions or alter voice-channel permissions. Locks survive restarts and are released by clicking **🔒** or automatically when the summons closes. Existing summons without a saved lock start unlocked.
 
@@ -209,7 +204,7 @@ Temporary squad voice channels explicitly allow **View Channel** and **Connect**
 
 If Discord rejects a squad voice permission update, the bot logs the missing permission and still attempts to move the member using the channel’s existing permissions. It keeps a usable channel tracked and retries access updates on later roster refreshes. A permission-edit failure alone does not delete the new channel.
 
-## Persistence and operations
+## Persistence and maintenance
 
 The default database is `data/roster.sqlite`. You do not need to create it manually: the bot creates the directory, SQLite file, tables, and indexes on its first successful startup. Back up that file to preserve all settings and squad assignments. Its write-ahead-log files may be present while the bot is running, so stop the bot before taking a simple file-copy backup.
 

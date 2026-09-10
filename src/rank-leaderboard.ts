@@ -1,6 +1,48 @@
 import { PermissionFlagsBits, type Guild } from "discord.js";
 import type { RosterRepository } from "./database.js";
 import { ALL_RANK_ABBREVIATIONS, isManualEnlistedRank, officerRankForSeconds, rankForSeconds } from "./ranks.js";
+import { rankDisplayName } from "./ranks.js";
+import { buildRosterEmbeds } from "./rosters/format.js";
+
+export async function publishLeaderboard(guild: Guild, repository: RosterRepository): Promise<void> {
+  const publication = repository.getLeaderboardPublication(guild.id);
+  if (!publication.channelId && !publication.pages.length) return;
+  const kept: typeof publication.pages = [];
+  const pending = [...publication.pages];
+  if (publication.channelId) {
+    const channel = await guild.channels.fetch(publication.channelId);
+    if (!channel || !channel.isTextBased() || !("send" in channel)) throw new Error("Leaderboard channel is unavailable.");
+    const entries = rankLeaderboard(guild, repository);
+    const embeds = buildRosterEmbeds({ title: "Rank leaderboard", color: 0xfe_a5_1d,
+      description: "Rank first, then current-track voice time. Live sessions included. Officers precede enlisted ranks.",
+      emptyText: "No current members.", sections: entries.length ? [{ name: `Members — ${entries.length}`, lines: entries.map((entry, index) =>
+        `${index + 1}. <@${entry.id}> — **${rankDisplayName(entry.rank)}** · ${Math.floor(entry.seconds / 3600)}h ${Math.floor(entry.seconds % 3600 / 60)}m`,
+      ) }] : [],
+    });
+    for (const embed of embeds) {
+      const index = pending.findIndex(page => page.channelId === channel.id);
+      const existing = index < 0 ? undefined : pending[index];
+      const message = existing ? await channel.messages.fetch(existing.messageId).catch((error: unknown) => {
+        if ((error as { code?: number }).code === 10008) return null;
+        throw error;
+      }) : null;
+      const payload = { content: "", embeds: [embed], allowedMentions: { parse: [] as never[] } };
+      const updated = message ? await message.edit(payload) : await channel.send(payload);
+      if (index >= 0) pending.splice(index, 1);
+      kept.push({ channelId: channel.id, messageId: updated.id });
+      repository.saveLeaderboardPages(guild.id, [...kept, ...pending]);
+    }
+  }
+  for (const page of pending) {
+    try {
+      const channel = await guild.channels.fetch(page.channelId);
+      if (channel?.isTextBased()) await channel.messages.delete(page.messageId);
+    } catch (error) {
+      if (![10003, 10008].includes((error as { code?: number }).code ?? 0)) kept.push(page);
+    }
+  }
+  repository.saveLeaderboardPages(guild.id, kept);
+}
 
 export function rankLeaderboard(guild: Guild, repository: RosterRepository, track = "all") {
   const config = repository.getGuildConfig(guild.id);

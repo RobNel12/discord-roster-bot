@@ -1,14 +1,14 @@
 # Command reference
 
-See [README.md](README.md) for installation, permissions, deployment, and troubleshooting. All commands run inside a Discord server. Command replies are private; published rosters, summons, and sign-ups appear in their selected channels.
+See [README.md](README.md) for installation, permissions, deployment, and troubleshooting. All commands run inside a Discord server. Command replies are private; published rosters and summons appear in their selected channels.
 
 ## Access
 
 - **Server managers:** members with Manage Server. They configure publications, the leader role, voice lobby, announcement channels, and manual ranks.
-- **Squad managers:** server managers or members with the exact configured squad leader role. They manage squads and create operations.
+- **Squad managers:** server managers or members with the exact configured squad leader role. They manage squads and summons.
 - **Members:** everyone can list squads, check rank progress, and use self-service membership controls. Locked squads reject new joins but allow current members to leave.
 
-Select autocomplete results for squad and page arguments; the bot uses their IDs internally. Optional arguments are marked below. Replace example dates with a future date.
+Select autocomplete results for squad and page arguments; the bot uses their IDs internally. Optional arguments are marked below.
 
 ## /roster
 
@@ -36,6 +36,10 @@ Select autocomplete results for squad and page arguments; the bot uses their IDs
 | `/squad set-call-channel` | Server manager | `channel`: Squad call channel | Choose where squad call notifications are sent |
 | `/squad clear-call-channel` | Server manager | None | Disable squad call notifications |
 | `/squad leaderboard` | Everyone | `page` (optional): Page number, 10 members per page; `track` (optional): all, enlisted, officer | Privately show current server members ranked by rank, then current-track voice time, including active sessions |
+| `/squad set-leaderboard-channel` | Server manager | `channel`: Text/announcement channel | Publish or move the automatically updated rank leaderboard |
+| `/squad clear-leaderboard-channel` | Server manager | None | Disable the live leaderboard and remove its messages |
+| `/squad wipe-rank` | Server manager | `member`: Member to reset; `confirm`: Must be true | Permanently clear one member's rank time and manual rank |
+| `/squad wipe-ranks` | Server manager | `confirm`: Must be true | Permanently clear all rank time and manual ranks in this server |
 | `/squad rank-progress` | Everyone | `member` (optional): Member to check; defaults to you | Check logged squad voice time and progress toward the next rank |
 | `/squad set-voice-lobby` | Server manager | `channel`: Join-to-create voice channel | Choose the voice channel that creates temporary squad channels |
 | `/squad clear-voice-lobby` | Server manager | None | Disable temporary voice channel creation |
@@ -50,12 +54,6 @@ Select autocomplete results for squad and page arguments; the bot uses their IDs
 | `/squad unassign` | Squad manager | `member`: Server member | Remove a member from their squad |
 | `/squad list` | Everyone | None | List squads and assignment counts |
 | `/squad refresh` | Squad manager | None | Reconcile and republish the squad roster |
-
-## /operation
-
-| Command | Access | Arguments | Purpose |
-| --- | --- | --- | --- |
-| `/operation create` | Squad manager | `name`: Operation name<br>`starts`: Date with timezone, e.g. 2026-09-12T19:00:00-07:00<br>`channel`: Sign-up channel<br>`description` (optional): Briefing or instructions | Post operation sign-ups (squad managers) |
 
 ## Roster menus and buttons
 
@@ -97,23 +95,6 @@ The main squad roster also shows each squad's current lock emoji. Explicit `/squ
 
 The most recently added reaction wins. Removing a reaction alone does not change readiness. With Manage Messages, the bot clears each response reaction so it can be clicked repeatedly; without it, remove and re-add your reaction to repeat that response. Controls and saved state survive restarts. Closed summons cannot be reopened; use **Call my squad** to create a new one.
 
-## Operation controls
-
-```text
-/operation create name:Saturday Operation starts:2026-09-12T19:00:00-07:00 channel:#operations description:Meet in squad voice before start.
-```
-
-`starts` must be a future ISO-style date and time with an explicit offset or `Z` for UTC, such as `2026-09-12T19:00:00-07:00`. Discord displays it in each reader's local timezone. The operation name is limited to 100 characters and the optional description to 600.
-
-| Control | Access | Behavior |
-| --- | --- | --- |
-| Going / Maybe / Unavailable | Everyone | Sets or changes your response while sign-ups are open. |
-| Start ready check | Squad manager | Freezes sign-ups and enables readiness reactions for Going/Maybe participants. |
-| ✅ / ❌ reactions | Going/Maybe participants | Marks you ready or not ready during the ready check. |
-| Close operation | Squad manager | Closes sign-ups/readiness and removes buttons, preserving the responses. |
-
-The start time is informational: a manager starts the ready check manually. An operation can also be closed directly from sign-ups. Readiness does not automatically assign a squad or loadout, and operations do not provide squad locks. Large lists paginate, with controls on each page for the same operation.
-
 ## Common workflows
 
 ### Initial setup
@@ -139,7 +120,7 @@ Enable Discord Developer Mode, then copy a roster message ID. Any page identifie
 /roster delete message-id:123456789012345678 confirm:true
 ```
 
-Deleting a publication preserves its configuration and squad assignments. Use its regular `set-channel` command to publish again. These commands target role/squad publications, not summons or operation messages. Squad deletion and role/page bulk removal require their explicit `confirm:true` arguments too.
+Deleting a publication preserves its configuration and squad assignments. Use its regular `set-channel` command to publish again. These commands target role/squad publications, not summons messages. Squad deletion and role/page bulk removal require their explicit `confirm:true` arguments too.
 
 ### Check and set ranks
 
@@ -148,6 +129,7 @@ Deleting a publication preserves its configuration and squad assignments. Use it
 /squad rank-progress member:@Member
 /squad leaderboard
 /squad leaderboard track:enlisted page:2
+/squad set-leaderboard-channel channel:#rank-leaderboard
 /squad set-rank member:@Member rank:SGT
 ```
 
@@ -155,6 +137,10 @@ Select the rank from Discord's offered choices. Only server managers can set it,
 
 Rank progression sends no automated channel messages or DMs. Rank progress and leaderboard commands reply ephemerally to the person using them. The old `set-rank-channel` and `clear-rank-channel` commands are retired; redeploy commands after updating. The combined leaderboard orders officers above enlisted ranks, breaks rank ties by current-track voice time and then member ID, and excludes bots/departed members. Use the track filter to compare members on the same progression track. Page numbers beyond the end display the last page.
 
+The configured live leaderboard publishes persistent embeds in its selected channel and edits them automatically on member/squad updates, rank changes, startup, and periodic reconciliation. Use `set-leaderboard-channel` again to move it or `clear-leaderboard-channel` to remove it; `/squad refresh` refreshes it manually. Ordinary `/squad leaderboard` remains a private snapshot.
+
+`/squad wipe-rank member:@Member confirm:true` and `/squad wipe-ranks confirm:true` require Manage Server, not just the squad leader role. Wiping clears accumulated rank time and manual appointments, including departed members' stored records for the server-wide command. Active voice counters restart at the wipe time. Members return to their current track's starting rank; squad assignments, loadouts, and templates remain. The leaderboard and squad roster refresh after reset. There is no undo command; progress can only be recovered from a prior database backup.
+
 ### Refresh and recover
 
-Use `/roster refresh` or `/squad refresh` after fixing permissions or if a roster looks stale. Squad refresh also updates open summons and voice access. A closed summons/operation stays closed; an open deleted page can be recreated during reconciliation.
+Use `/roster refresh` or `/squad refresh` after fixing permissions or if a roster looks stale. Squad refresh also updates open summons and voice access. A closed summons stays closed; an open deleted page can be recreated during reconciliation.

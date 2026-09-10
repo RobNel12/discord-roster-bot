@@ -62,6 +62,10 @@ export class TemporaryVoiceService {
     this.rankTimers.clear();
   }
 
+  refreshRankTimers(guild: Guild): void {
+    for (const session of this.repository.listActiveVoiceSessions(guild.id)) this.scheduleNextRankUpdate(guild, session.userId);
+  }
+
   private scheduleNextRankUpdate(guild: Guild, userId: string): void {
     this.cancelRankTimer(guild.id, userId);
     const state = this.repository.getMemberRankState(guild.id, userId);
